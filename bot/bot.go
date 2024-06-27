@@ -62,7 +62,7 @@ func newMessage(discord *discordgo.Session, message *discordgo.MessageCreate) {
 
 	// respond to user message if it contains `!help`, `!bye`, or `!join`
 	switch {
-	case strings.Contains(message.Content, "!help"):
+	case strings.Contains(message.Content, "!hello"):
 		discord.ChannelMessageSend(message.ChannelID, "Hello World😃")
 	case strings.Contains(message.Content, "!bye"):
 		discord.ChannelMessageSend(message.ChannelID, "Good bye👋")
