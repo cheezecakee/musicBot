@@ -19,21 +19,20 @@ func checkNilErr(e error) {
 }
 
 func Run() {
-	// create a session
+	// Create a session
 	discord, err := discordgo.New("Bot " + BotToken)
 	checkNilErr(err)
 
-	// add an event handler
+	// Add an event handler
 	discord.AddHandler(newMessage)
 
-	// open session
+	// Open session
 	err = discord.Open()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer discord.Close()
 
-	// keep bot running until there is an OS interruption (ctrl + C)
 	fmt.Println("Bot running...")
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -41,62 +40,89 @@ func Run() {
 }
 
 func newMessage(discord *discordgo.Session, message *discordgo.MessageCreate) {
-	// prevent bot from responding to its own messages
+	// Prevent bot from responding to its own messages
 	if message.Author.ID == discord.State.User.ID {
 		return
 	}
 
-	// get the channel information
+	// Parse and handle commands
+	if err := handleCommand(discord, message); err != nil {
+		log.Println("Command error:", err)
+	}
+}
+
+func handleCommand(discord *discordgo.Session, message *discordgo.MessageCreate) error {
+	// Get the channel information
 	channel, err := discord.State.Channel(message.ChannelID)
 	if err != nil {
-		log.Println("Error getting channel:", err)
-		return
+		return fmt.Errorf("error getting channel: %v", err)
 	}
 
-	// get the guild information
+	// Get the guild information
 	guild, err := discord.State.Guild(channel.GuildID)
 	if err != nil {
-		log.Println("Error getting guild:", err)
-		return
+		return fmt.Errorf("error getting guild: %v", err)
 	}
 
-	// respond to user message if it contains `!help`, `!bye`, or `!join`
 	switch {
 	case strings.Contains(message.Content, "!hello"):
-		discord.ChannelMessageSend(message.ChannelID, "Hello World😃")
+		return handleHelloCommand(discord, message)
 	case strings.Contains(message.Content, "!bye"):
-		discord.ChannelMessageSend(message.ChannelID, "Good bye👋")
+		return handleByeCommand(discord, message)
 	case strings.Contains(message.Content, "!join"):
-		// find the voice state of the user
-		var voiceState *discordgo.VoiceState
-		for _, vs := range guild.VoiceStates {
-			if vs.UserID == message.Author.ID {
-				voiceState = vs
-				break
-			}
-		}
-
-		if voiceState == nil {
-			discord.ChannelMessageSend(message.ChannelID, "You must be in a voice channel to use this command.")
-			return
-		}
-
-		// join the voice channel
-		voice, err := discord.ChannelVoiceJoin(guild.ID, voiceState.ChannelID, false, false)
+		_, err = handleJoinCommand(discord, message, guild)
 		if err != nil {
-			discord.ChannelMessageSend(message.ChannelID, "Failed to join the voice channel.")
-			log.Println("Error joining the voice channel:", err)
-			return
+			return err
 		}
-
-		go func() {
-			if strings.Contains(message.Content, "!leave") {
-				voice.Disconnect()
-				discord.ChannelMessageSend(message.ChannelID, "Left the voice channel.")
-				return
-			}
-		}()
-
-		discord.ChannelMessageSend(message.ChannelID, "Joined the voice channel!")
+	case strings.Contains(message.Content, "!leave"):
+		handleLeaveCommand(discord, message, guild)
+	default:
+		// Handle unknown commands or ignore non-command messages
+		return nil
 	}
+	return nil
+}
+
+func handleHelloCommand(discord *discordgo.Session, message *discordgo.MessageCreate) error {
+	discord.ChannelMessageSend(message.ChannelID, "Hello World😃")
+	return nil
+}
+
+func handleByeCommand(discord *discordgo.Session, message *discordgo.MessageCreate) error {
+	discord.ChannelMessageSend(message.ChannelID, "Good bye👋")
+	return nil
+}
+
+func handleJoinCommand(discord *discordgo.Session, message *discordgo.MessageCreate, guild *discordgo.Guild) (*discordgo.VoiceConnection, error) {
+	// Find the voice state of the user
+	voiceState, err := getVoiceState(guild, message.Author.ID)
+	if err != nil {
+		discord.ChannelMessageSend(message.ChannelID, "You must be in a voice channel to use this command.")
+		return nil, fmt.Errorf("user not in a voice channel")
+	}
+
+	// Join the voice channel
+	voice, err := discord.ChannelVoiceJoin(guild.ID, voiceState.ChannelID, false, false)
+	if err != nil {
+		discord.ChannelMessageSend(message.ChannelID, "Failed to join the voice channel.")
+		return nil, fmt.Errorf("failed to join voice channel: %v", err)
+	}
+
+	discord.ChannelMessageSend(message.ChannelID, "Joined the voice channel!")
+	return voice, nil
+}
+
+func handleLeaveCommand(discord *discordgo.Session, message *discordgo.MessageCreate, guild *discordgo.Guild) {
+	voiceConnection, _ := handleJoinCommand(discord, message, guild)
+	voiceConnection.Disconnect()
+	discord.ChannelMessageSend(message.ChannelID, "Left the voice channel!")
+}
+
+func getVoiceState(guild *discordgo.Guild, userID string) (*discordgo.VoiceState, error) {
+	for _, vs := range guild.VoiceStates {
+		if vs.UserID == userID {
+			return vs, nil
+		}
+	}
+	return nil, fmt.Errorf("user not in a voice channel")
 }
