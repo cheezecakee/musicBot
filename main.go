@@ -1,6 +1,7 @@
 package main
 
 import (
+	app "discordBot/App"
 	bot "discordBot/Bot"
 	"log"
 	"os"
@@ -13,6 +14,8 @@ func main() {
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
+	app.InitSpotify()
+
 	bot.BotToken = os.Getenv("DISCORD_BOT_TOKEN")
 	bot.Run()
 }

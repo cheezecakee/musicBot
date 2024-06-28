@@ -1,6 +1,8 @@
 package bot
 
 import (
+	"context"
+	"discordBot/App"
 	"fmt"
 	"log"
 	"os"
@@ -76,6 +78,10 @@ func handleCommand(discord *discordgo.Session, message *discordgo.MessageCreate)
 		}
 	case strings.Contains(message.Content, "!leave"):
 		handleLeaveCommand(discord, message, guild)
+	case strings.Contains(message.Content, "!play"):
+		if err := handlePlay(discord, message); err != nil {
+			return err
+		}
 	default:
 		// Handle unknown commands or ignore non-command messages
 		return nil
@@ -125,4 +131,16 @@ func getVoiceState(guild *discordgo.Guild, userID string) (*discordgo.VoiceState
 		}
 	}
 	return nil, fmt.Errorf("user not in a voice channel")
+}
+
+func handlePlay(discord *discordgo.Session, message *discordgo.MessageCreate) error {
+	ctx := context.Background()
+	trackName := strings.TrimPrefix(message.Content, "!play")
+	track, err := app.SearchTrack(ctx, trackName)
+	if err != nil {
+		discord.ChannelMessageSend(message.ChannelID, "Could not find the song")
+		return err
+	}
+	discord.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Now Playing %s by  %s", trackName, track.Artists[0].Name))
+	return nil
 }
