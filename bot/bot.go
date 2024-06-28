@@ -2,7 +2,7 @@ package bot
 
 import (
 	"context"
-	"discordBot/App"
+	"discordBot/app"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/zmb3/spotify/v2"
+	"google.golang.org/api/youtube/v3"
 )
 
 var BotToken string
@@ -79,7 +81,11 @@ func handleCommand(discord *discordgo.Session, message *discordgo.MessageCreate)
 	case strings.Contains(message.Content, "!leave"):
 		handleLeaveCommand(discord, message, guild)
 	case strings.Contains(message.Content, "!play"):
-		if err := handlePlay(discord, message); err != nil {
+		track, err := searchSongSpotify(discord, message)
+		if err != nil {
+			return err
+		}
+		if err = searchSongYoutube(discord, message, track); err != nil {
 			return err
 		}
 	default:
@@ -133,14 +139,34 @@ func getVoiceState(guild *discordgo.Guild, userID string) (*discordgo.VoiceState
 	return nil, fmt.Errorf("user not in a voice channel")
 }
 
-func handlePlay(discord *discordgo.Session, message *discordgo.MessageCreate) error {
+// func handlePlay(discord *discordgo.Session, message *discordgo.MessageCreate) error {
+// 	return nil
+// }
+
+func playVideo(video *youtube.SearchResult) error {
+	fmt.Println("Playing video:", video.Snippet.Title)
+	return nil
+}
+
+func searchSongSpotify(discord *discordgo.Session, message *discordgo.MessageCreate) (*spotify.FullTrack, error) {
 	ctx := context.Background()
 	trackName := strings.TrimPrefix(message.Content, "!play")
 	track, err := app.SearchTrack(ctx, trackName)
 	if err != nil {
 		discord.ChannelMessageSend(message.ChannelID, "Could not find the song")
+		return nil, err
+	}
+	discord.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Found sone %s by %s on Spotify", trackName, track.Artists[0].Name))
+	return track, nil
+}
+
+func searchSongYoutube(discord *discordgo.Session, message *discordgo.MessageCreate, track *spotify.FullTrack) error {
+	ctx := context.Background()
+	video, err := app.SearchVideo(ctx, fmt.Sprintf("%s by %s", track.Name, track.Artists[0].Name))
+	if err != nil {
+		discord.ChannelMessageSend(message.ChannelID, "Could not find the song on YouTube")
 		return err
 	}
-	discord.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Now Playing %s by  %s", trackName, track.Artists[0].Name))
+	discord.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Found on YouTube: %s", video.Snippet.Title))
 	return nil
 }

@@ -1,8 +1,8 @@
 package main
 
 import (
-	app "discordBot/App"
-	bot "discordBot/Bot"
+	app "discordBot/app"
+	bot "discordBot/bot"
 	"log"
 	"os"
 
@@ -15,6 +15,10 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 	app.InitSpotify()
+
+	if err := app.InitYouTube(); err != nil {
+		log.Fatal("Error initializing YouTube client:", err)
+	}
 
 	bot.BotToken = os.Getenv("DISCORD_BOT_TOKEN")
 	bot.Run()
