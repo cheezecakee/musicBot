@@ -4,14 +4,17 @@ import (
 	"context"
 	"discordBot/app"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/zmb3/spotify/v2"
-	"google.golang.org/api/youtube/v3"
+	_ "google.golang.org/api/youtube/v3"
 )
 
 var BotToken string
@@ -81,11 +84,8 @@ func handleCommand(discord *discordgo.Session, message *discordgo.MessageCreate)
 	case strings.Contains(message.Content, "!leave"):
 		handleLeaveCommand(discord, message, guild)
 	case strings.Contains(message.Content, "!play"):
-		track, err := searchSongSpotify(discord, message)
+		err := handlePlay(discord, message)
 		if err != nil {
-			return err
-		}
-		if err = searchSongYoutube(discord, message, track); err != nil {
 			return err
 		}
 	default:
@@ -96,7 +96,7 @@ func handleCommand(discord *discordgo.Session, message *discordgo.MessageCreate)
 }
 
 func handleHelloCommand(discord *discordgo.Session, message *discordgo.MessageCreate) error {
-	discord.ChannelMessageSend(message.ChannelID, "Hello World😃")
+	discord.ChannelMessageSend(message.ChannelID, "Hello Kosta😃")
 	return nil
 }
 
@@ -139,12 +139,61 @@ func getVoiceState(guild *discordgo.Guild, userID string) (*discordgo.VoiceState
 	return nil, fmt.Errorf("user not in a voice channel")
 }
 
-// func handlePlay(discord *discordgo.Session, message *discordgo.MessageCreate) error {
-// 	return nil
-// }
+func handlePlay(discord *discordgo.Session, message *discordgo.MessageCreate) error {
+	// Search for the song on Spotify
+	track, err := searchSongSpotify(discord, message)
+	if err != nil {
+		return nil
+	}
 
-func playVideo(video *youtube.SearchResult) error {
-	fmt.Println("Playing video:", video.Snippet.Title)
+	// Search for the video on YouTube
+	videoID, err := searchSongYoutube(discord, message, track)
+	if err != nil {
+		return err
+	}
+
+	// Join the voice channel
+	vc, err := handleJoinCommand(discord, message, discord.State.Guilds[0])
+	if err != nil {
+		return err
+	}
+
+	// Dowandload and convert the video to audio
+	err = downloadConvertVideo(videoID, "/tmp/audio.mp3")
+	if err != nil {
+		discord.ChannelMessageSend(message.ChannelID, "Failed to download or convert the video")
+	}
+
+	return playAudio(vc, "/tmp/audio.mp3")
+}
+
+func playAudio(vc *discordgo.VoiceConnection, audioFilePath string) error {
+	cmd := exec.Command("ffmpeg", "-i", audioFilePath, "-f", "s16le", "ar", "48000", "-ac", "2", "pipe:1")
+	ffmpegOut, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create ffmpeg stdout pipe: %v", err)
+	}
+
+	err = cmd.Start()
+	if err != nil {
+		return fmt.Errorf("failed to start ffmpeg: %v", err)
+	}
+
+	vc.Speaking(true)
+	for {
+		buf := make([]byte, 960)
+		n, err := ffmpegOut.Read(buf)
+		if err != nil {
+			break
+		}
+		vc.OpusSend <- buf[:n]
+	}
+	vc.Speaking(false)
+
+	err = cmd.Wait()
+	if err != nil {
+		return fmt.Errorf("ffmpeg command failed: %v", err)
+	}
 	return nil
 }
 
@@ -160,13 +209,50 @@ func searchSongSpotify(discord *discordgo.Session, message *discordgo.MessageCre
 	return track, nil
 }
 
-func searchSongYoutube(discord *discordgo.Session, message *discordgo.MessageCreate, track *spotify.FullTrack) error {
+func searchSongYoutube(discord *discordgo.Session, message *discordgo.MessageCreate, track *spotify.FullTrack) (string, error) {
 	ctx := context.Background()
 	video, err := app.SearchVideo(ctx, fmt.Sprintf("%s by %s", track.Name, track.Artists[0].Name))
 	if err != nil {
 		discord.ChannelMessageSend(message.ChannelID, "Could not find the song on YouTube")
+		return "", err
+	}
+	discord.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Found on YouTube: %s", video))
+	return video, nil
+}
+
+func downloadConvertVideo(videoID string, outputPath string) error {
+	// Construct the download URL
+	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+
+	// Download the video
+	err := downloadFile(url, "/tmp/video.webm")
+	if err != nil {
 		return err
 	}
-	discord.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Found on YouTube: %s", video.Snippet.Title))
+
+	// Convert the video to MP3"
+	cmd := exec.Command("ffmpeg", "-i", "/tmp/video.webm", "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k", outputPath)
+	err = cmd.Run()
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func downloadFile(url, outputPath string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	out, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	return err
 }

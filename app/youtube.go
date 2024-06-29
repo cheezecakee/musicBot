@@ -22,17 +22,21 @@ func InitYouTube() error {
 	return nil
 }
 
-func SearchVideo(ctx context.Context, query string) (*youtube.SearchResult, error) {
+func SearchVideo(ctx context.Context, query string) (string, error) {
 	if youtubeService == nil {
-		return nil, fmt.Errorf("YoutTube client is not initiazlized")
+		return "", fmt.Errorf("YoutTube client is not initiazlized")
 	}
 	call := youtubeService.Search.List([]string{"id", "snippet"}).Q(query).MaxResults(1)
 	response, err := call.Context(ctx).Do()
 	if err != nil {
-		return nil, fmt.Errorf("error making Youtube API call: %v", err)
+		return "", fmt.Errorf("error making Youtube API call: %v", err)
 	}
 	if len(response.Items) == 0 {
-		return nil, fmt.Errorf("no videos found")
+		return "", fmt.Errorf("no videos found")
 	}
-	return response.Items[0], nil
+	videoID := response.Items[0].Id.VideoId
+	if videoID == "" {
+		return "", fmt.Errorf("video ID not found in API response")
+	}
+	return videoID, nil
 }
