@@ -1,25 +1,25 @@
 package main
 
 import (
-	app "discordBot/app"
-	bot "discordBot/bot"
+	"discordBot/app"
+	"discordBot/app/auth"
+	"discordBot/bot"
 	"log"
-	"os"
-
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	err := godotenv.Load()
+	tokens, err := auth.LoadTokens()
 	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-	app.InitSpotify()
-
-	if err := app.InitYouTube(); err != nil {
-		log.Fatal("Error initializing YouTube client:", err)
+		log.Fatalf("Error loading tokens: %v", err)
 	}
 
-	bot.BotToken = os.Getenv("DISCORD_BOT_TOKEN")
+	clients, err := auth.InitClients(tokens)
+	if err != nil {
+		log.Fatalf("Error initializing clients: %v", err)
+	}
+	log.Println(clients)
+
+	bot.Clients = clients
+	app.Clients = clients
 	bot.Run()
 }
