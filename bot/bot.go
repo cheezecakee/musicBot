@@ -2,43 +2,61 @@ package bot
 
 import (
 	"context"
-	"discordBot/app"
+	"discordBot/app/auth"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/zmb3/spotify/v2"
-	_ "google.golang.org/api/youtube/v3"
 )
 
-var BotToken string
+var (
+	Clients *auth.Clients
+	pl      PlayList
+)
 
-func checkNilErr(e error) {
-	if e != nil {
-		log.Fatal(e)
-	}
+type Bot struct {
+	Session         *discordgo.Session
+	Message         *discordgo.MessageCreate
+	Guild           *discordgo.Guild
+	State           *discordgo.State
+	VoiceConnection *discordgo.VoiceConnection
+	VoiceState      *discordgo.VoiceState
+	Context         context.Context
+	pl              PlayList
+}
+
+type PlayList struct {
+	trackName string
+	track     *spotify.FullTrack
+	videoID   string
+	output    string
 }
 
 func Run() {
-	// Create a session
-	discord, err := discordgo.New("Bot " + BotToken)
-	checkNilErr(err)
+	session := Clients.Discord
+	context := context.Background()
+
+	// Create a new bot instance
+	bot := &Bot{
+		Session: session,
+		Context: context,
+	}
 
 	// Add an event handler
-	discord.AddHandler(newMessage)
+	session.AddHandler(bot.newMessage)
 
 	// Open session
-	err = discord.Open()
+	err := session.Open()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error opening Discord session: %v", err)
+	} else {
+		log.Println("Discord session successfully started.")
 	}
-	defer discord.Close()
+	defer session.Close()
 
 	fmt.Println("Bot running...")
 	c := make(chan os.Signal, 1)
@@ -46,213 +64,138 @@ func Run() {
 	<-c
 }
 
-func newMessage(discord *discordgo.Session, message *discordgo.MessageCreate) {
+func (bot *Bot) sendMessage(content string) {
+	bot.Session.ChannelMessageSend(bot.Message.ChannelID, content)
+}
+
+func (bot *Bot) newMessage(session *discordgo.Session, message *discordgo.MessageCreate) {
+	// Initialize the bot instance
+	bot.Message = message
+
+	channel, err := session.State.Channel(message.ChannelID)
+	if err != nil {
+		log.Println("Error getting channel:", err)
+		return
+	}
+
+	guild, err := session.State.Guild(channel.GuildID)
+	if err != nil {
+		log.Println("Error getting guild:", err)
+		return
+	}
+
+	bot.Guild = guild
+
 	// Prevent bot from responding to its own messages
-	if message.Author.ID == discord.State.User.ID {
+	if bot.Message.Author.ID == bot.Session.State.User.ID {
 		return
 	}
 
 	// Parse and handle commands
-	if err := handleCommand(discord, message); err != nil {
+	if err := bot.HandleCommand(); err != nil {
 		log.Println("Command error:", err)
 	}
 }
 
-func handleCommand(discord *discordgo.Session, message *discordgo.MessageCreate) error {
-	// Get the channel information
-	channel, err := discord.State.Channel(message.ChannelID)
-	if err != nil {
-		return fmt.Errorf("error getting channel: %v", err)
+// Find out who the userID is
+func (bot *Bot) getVoiceState() error {
+	for _, vs := range bot.Guild.VoiceStates {
+		if vs.UserID == bot.Message.Author.ID {
+			bot.VoiceState = vs
+			return nil
+		}
 	}
+	return fmt.Errorf("user not in a voice channel")
+}
 
-	// Get the guild information
-	guild, err := discord.State.Guild(channel.GuildID)
-	if err != nil {
-		return fmt.Errorf("error getting guild: %v", err)
+func (bot *Bot) getTrackName() {
+	trackName := strings.TrimSpace(strings.TrimPrefix(bot.Message.Content, "!play"))
+	if trackName == "" {
+		bot.sendMessage("Invalid song name.")
+		return
 	}
+	bot.pl.trackName = trackName
+}
 
+func (bot *Bot) HandleCommand() error {
 	switch {
-	case strings.Contains(message.Content, "!hello"):
-		return handleHelloCommand(discord, message)
-	case strings.Contains(message.Content, "!bye"):
-		return handleByeCommand(discord, message)
-	case strings.Contains(message.Content, "!join"):
-		_, err = handleJoinCommand(discord, message, guild)
-		if err != nil {
+	case strings.Contains(bot.Message.Content, "!hello"):
+		return bot.handleHelloCommand()
+	case strings.Contains(bot.Message.Content, "!bye"):
+		return bot.handleByeCommand()
+	case strings.Contains(bot.Message.Content, "!join"):
+		if err := bot.handleJoinCommand(); err != nil {
 			return err
 		}
-	case strings.Contains(message.Content, "!leave"):
-		handleLeaveCommand(discord, message, guild)
-	case strings.Contains(message.Content, "!play"):
-		err := handlePlay(discord, message)
-		if err != nil {
+	case strings.Contains(bot.Message.Content, "!leave"):
+		bot.handleLeaveCommand()
+	case strings.Contains(bot.Message.Content, "!play"):
+		if err := bot.handlePlayCommand(); err != nil {
 			return err
 		}
 	default:
-		// Handle unknown commands or ignore non-command messages
 		return nil
 	}
 	return nil
 }
 
-func handleHelloCommand(discord *discordgo.Session, message *discordgo.MessageCreate) error {
-	discord.ChannelMessageSend(message.ChannelID, "Hello Kosta😃")
+func (bot *Bot) handleHelloCommand() error {
+	bot.sendMessage("Hello World 😃")
 	return nil
 }
 
-func handleByeCommand(discord *discordgo.Session, message *discordgo.MessageCreate) error {
-	discord.ChannelMessageSend(message.ChannelID, "Good bye👋")
+func (bot *Bot) handleByeCommand() error {
+	bot.sendMessage("Good bye 👋")
 	return nil
 }
 
-func handleJoinCommand(discord *discordgo.Session, message *discordgo.MessageCreate, guild *discordgo.Guild) (*discordgo.VoiceConnection, error) {
+func (bot *Bot) handleJoinCommand() error {
 	// Find the voice state of the user
-	voiceState, err := getVoiceState(guild, message.Author.ID)
+	err := bot.getVoiceState()
 	if err != nil {
-		discord.ChannelMessageSend(message.ChannelID, "You must be in a voice channel to use this command.")
-		return nil, fmt.Errorf("user not in a voice channel")
+		bot.sendMessage("You must be in a voice channel to use this command.")
+		return fmt.Errorf("user not in a voice channel")
 	}
 
 	// Join the voice channel
-	voice, err := discord.ChannelVoiceJoin(guild.ID, voiceState.ChannelID, false, false)
+	voice, err := bot.Session.ChannelVoiceJoin(bot.Guild.ID, bot.VoiceState.ChannelID, false, false)
 	if err != nil {
-		discord.ChannelMessageSend(message.ChannelID, "Failed to join the voice channel.")
-		return nil, fmt.Errorf("failed to join voice channel: %v", err)
+		bot.sendMessage("Failed to join the voice channel.")
+		return fmt.Errorf("failed to join voice channel: %v", err)
 	}
 
-	discord.ChannelMessageSend(message.ChannelID, "Joined the voice channel!")
-	return voice, nil
-}
+	bot.VoiceConnection = voice
 
-func handleLeaveCommand(discord *discordgo.Session, message *discordgo.MessageCreate, guild *discordgo.Guild) {
-	voiceConnection, _ := handleJoinCommand(discord, message, guild)
-	voiceConnection.Disconnect()
-	discord.ChannelMessageSend(message.ChannelID, "Left the voice channel!")
-}
-
-func getVoiceState(guild *discordgo.Guild, userID string) (*discordgo.VoiceState, error) {
-	for _, vs := range guild.VoiceStates {
-		if vs.UserID == userID {
-			return vs, nil
-		}
-	}
-	return nil, fmt.Errorf("user not in a voice channel")
-}
-
-func handlePlay(discord *discordgo.Session, message *discordgo.MessageCreate) error {
-	// Search for the song on Spotify
-	track, err := searchSongSpotify(discord, message)
-	if err != nil {
-		return nil
-	}
-
-	// Search for the video on YouTube
-	videoID, err := searchSongYoutube(discord, message, track)
-	if err != nil {
-		return err
-	}
-
-	// Join the voice channel
-	vc, err := handleJoinCommand(discord, message, discord.State.Guilds[0])
-	if err != nil {
-		return err
-	}
-
-	// Dowandload and convert the video to audio
-	err = downloadConvertVideo(videoID, "/tmp/audio.mp3")
-	if err != nil {
-		discord.ChannelMessageSend(message.ChannelID, "Failed to download or convert the video")
-	}
-
-	return playAudio(vc, "/tmp/audio.mp3")
-}
-
-func playAudio(vc *discordgo.VoiceConnection, audioFilePath string) error {
-	cmd := exec.Command("ffmpeg", "-i", audioFilePath, "-f", "s16le", "ar", "48000", "-ac", "2", "pipe:1")
-	ffmpegOut, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create ffmpeg stdout pipe: %v", err)
-	}
-
-	err = cmd.Start()
-	if err != nil {
-		return fmt.Errorf("failed to start ffmpeg: %v", err)
-	}
-
-	vc.Speaking(true)
-	for {
-		buf := make([]byte, 960)
-		n, err := ffmpegOut.Read(buf)
-		if err != nil {
-			break
-		}
-		vc.OpusSend <- buf[:n]
-	}
-	vc.Speaking(false)
-
-	err = cmd.Wait()
-	if err != nil {
-		return fmt.Errorf("ffmpeg command failed: %v", err)
-	}
+	bot.sendMessage("Joined the voice channel!")
 	return nil
 }
 
-func searchSongSpotify(discord *discordgo.Session, message *discordgo.MessageCreate) (*spotify.FullTrack, error) {
-	ctx := context.Background()
-	trackName := strings.TrimPrefix(message.Content, "!play")
-	track, err := app.SearchTrack(ctx, trackName)
-	if err != nil {
-		discord.ChannelMessageSend(message.ChannelID, "Could not find the song")
-		return nil, err
+func (bot *Bot) handleLeaveCommand() {
+	if bot.VoiceConnection != nil {
+		bot.VoiceConnection.Disconnect()
+		bot.VoiceConnection = nil
+		bot.sendMessage("Left the voice channel!")
+	} else {
+		bot.sendMessage("I'm not in a voice channel.")
 	}
-	discord.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Found sone %s by %s on Spotify", trackName, track.Artists[0].Name))
-	return track, nil
 }
 
-func searchSongYoutube(discord *discordgo.Session, message *discordgo.MessageCreate, track *spotify.FullTrack) (string, error) {
-	ctx := context.Background()
-	video, err := app.SearchVideo(ctx, fmt.Sprintf("%s by %s", track.Name, track.Artists[0].Name))
-	if err != nil {
-		discord.ChannelMessageSend(message.ChannelID, "Could not find the song on YouTube")
-		return "", err
-	}
-	discord.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Found on YouTube: %s", video))
-	return video, nil
-}
-
-func downloadConvertVideo(videoID string, outputPath string) error {
-	// Construct the download URL
-	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
-
-	// Download the video
-	err := downloadFile(url, "/tmp/video.webm")
+func (bot *Bot) handlePlayCommand() error {
+	bot.getTrackName()
+	err := bot.downloadAudio()
 	if err != nil {
 		return err
 	}
-
-	// Convert the video to MP3"
-	cmd := exec.Command("ffmpeg", "-i", "/tmp/video.webm", "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k", outputPath)
-	err = cmd.Run()
+	// Play audio
+	err = bot.streamAudio()
 	if err != nil {
+		bot.sendMessage(fmt.Sprintf("Error: %v", err))
 		return err
 	}
-
+	// err := bot.testAudio()
+	// if err != nil {
+	// 	return err
+	// }
+	// bot.sendMessage(fmt.Sprintf("Now playing: %s by %s", track.Name, track.Artists[0].Name))
 	return nil
-}
-
-func downloadFile(url, outputPath string) error {
-	resp, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	out, err := os.Create(outputPath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, resp.Body)
-	return err
 }
