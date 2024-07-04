@@ -7,20 +7,70 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/jonas747/dca"
 )
 
+func (bot *Bot) streamAudio() error {
+	err := bot.handleJoinCommand()
+	if err != nil {
+		return (err)
+	}
+	bot.VoiceConnection.Speaking(true)
+
+	bot.sendMessage(fmt.Sprintf("Now playing: %s by %s", bot.pl.track.Name, bot.pl.track.Artists[0].Name))
+
+	bot.convertToDCA()
+
+	file, err := os.Open(bot.pl.path)
+	if err != nil {
+		fmt.Println("Error opening dca file :", err)
+		return err
+	}
+
+	// Create a DCA decoder to read from the encoded DCA file
+	decoder := dca.NewDecoder(file)
+
+	// Read and stream each Opus frame to Discord
+	for {
+		frame, err := decoder.OpusFrame()
+		if err != nil {
+			if err != io.EOF {
+				return nil
+			}
+			break // End of audio stream
+		}
+
+		// Send the Opus frame to Discord
+		select {
+		case bot.VoiceConnection.OpusSend <- frame:
+		case <-time.After(time.Second):
+			return nil
+		}
+	}
+
+	bot.VoiceConnection.Disconnect()
+	err = bot.cleanUpDir()
+	if err != nil {
+		fmt.Printf("Failed to clean up temp directory: %v\n", err)
+	}
+
+	fmt.Println("Audio stream completed successfully")
+	return nil
+}
+
 func (bot *Bot) convertToDCA() error {
 	// Construct the ffmpeg command to convert the audio file to DCA format
 	cmd := exec.Command("ffmpeg", "-i", bot.pl.output, "-f", "s16le", "-ac", "2", "-ar", "48000", "-acodec", "pcm_s16le", "-")
 
+	// Create path with song name
+	bot.pl.path = "./player/" + bot.pl.track.Name + ".dca"
+
 	// Pipe the output to dca
 	dcaCmd := exec.Command("dca")
 	dcaCmd.Stdin, _ = cmd.StdoutPipe()
-	dcaCmd.Stdout, _ = os.Create("output.dca")
+	dcaCmd.Stdout, _ = os.Create(bot.pl.path)
 
 	// Start the ffmpeg command
 	if err := cmd.Start(); err != nil {
@@ -42,63 +92,33 @@ func (bot *Bot) convertToDCA() error {
 		return fmt.Errorf("dca command failed: %v", err)
 	}
 
+	fmt.Println(bot.pl.output)
+
 	fmt.Println("Conversion to DCA completed successfully")
 	return nil
 }
 
-func (bot *Bot) encodeAudio() error {
-	encodingSession, err := dca.EncodeFile(bot.pl.output, dca.StdEncodeOptions)
+func (bot *Bot) downloadAudio() error {
+	// Search for the track on Spotify
+	track, err := app.SearchTrack(bot.ctx, bot.pl.trackName)
 	if err != nil {
-		return fmt.Errorf("error encoding file %v", err)
+		return fmt.Errorf("error searching track: %v", err)
 	}
-	defer encodingSession.Cleanup()
-
-	output, err := os.Create("output.dca")
+	bot.pl.track = track
+	// Use the track name and artist for the Youtube search query
+	query := fmt.Sprintf("%s %s official", track.Name, track.Artists[0].Name)
+	bot.pl.videoID, err = app.SearchVideo(bot.ctx, query)
 	if err != nil {
-		// Handle the error
+		return fmt.Errorf("error search video: %v", err)
 	}
-	io.Copy(output, encodingSession)
 
-	return nil
-}
-
-func (bot *Bot) streamAudio() error {
-	err := bot.handleJoinCommand()
+	// Convert the video to audio
+	err = bot.convertVideo()
 	if err != nil {
-		return (err)
-	}
-	bot.VoiceConnection.Speaking(true)
-
-	bot.convertToDCA()
-
-	file, err := os.Open("output.dca")
-	if err != nil {
-		fmt.Println("Error opening dca file :", err)
-		return err
+		return fmt.Errorf("error converting video: %v", err)
 	}
 
-	// Create a DCA decoder to read from the encoded DCA file
-	decoder := dca.NewDecoder(file)
-
-	// Read and stream each Opus frame to Discord
-	for {
-		frame, err := decoder.OpusFrame()
-		if err != nil {
-			if err != io.EOF {
-				return fmt.Errorf("error reading Opus frame: %v", err)
-			}
-			break // End of audio stream
-		}
-
-		// Send the Opus frame to Discord
-		select {
-		case bot.VoiceConnection.OpusSend <- frame:
-		case <-time.After(time.Second):
-			return fmt.Errorf("timeout sending Opus frame to Discord")
-		}
-	}
-
-	fmt.Println("Audio stream completed successfully")
+	// fmt.Println("video ID:", bot.pl.videoID)
 	return nil
 }
 
@@ -112,20 +132,21 @@ func (bot *Bot) convertVideo() error {
 	}
 
 	// Create a temporary directory for the song
-	sanitizedTrackName := strings.ReplaceAll(bot.pl.track.Name, " ", "_")
-	outputDir := filepath.Join("player", sanitizedTrackName)
-	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create output directory: %v", err)
+	tempDir := filepath.Join("player", "temp")
+	if err := os.MkdirAll(tempDir, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create temporary directory: %v", err)
 	}
 
+	song := bot.pl.track.Name + ".opus"
+
 	// Define the output path
-	bot.pl.output = filepath.Join(outputDir, "song.mp3")
+	bot.pl.output = filepath.Join(tempDir, song)
 
 	// Define the yt-dpl command arguments
 	args := []string{
 		url,
 		"--extract-audio",
-		"--audio-format", "mp3",
+		"--audio-format", "opus",
 		"--output", bot.pl.output,
 		"--quiet",
 		"--no-playlist",
@@ -140,71 +161,28 @@ func (bot *Bot) convertVideo() error {
 		return fmt.Errorf("failed to download and convert video: %v", err)
 	}
 
-	fmt.Println(bot.pl.output)
-
 	return nil
 }
 
-func (bot *Bot) downloadAudio() error {
-	// Search for the track on Spotify
-	track, err := app.SearchTrack(bot.pl.trackName)
+func (bot *Bot) cleanUpDir() error {
+	tempDir := "./player"
+	dir, err := os.Open(tempDir)
 	if err != nil {
-		return fmt.Errorf("error searching track: %v", err)
+		return fmt.Errorf("failed to open temp directory: %v", err)
 	}
-	bot.pl.track = track
-	// Use the track name and artist for the Youtube search query
-	query := fmt.Sprintf("%s %s", track.Name, track.Artists[0].Name)
-	bot.pl.videoID, err = app.SearchVideo(query)
-	if err != nil {
-		return fmt.Errorf("error search video: %v", err)
-	}
+	defer dir.Close()
 
-	// Convert the video to audio
-	err = bot.convertVideo()
+	files, err := dir.Readdir(0)
 	if err != nil {
-		return fmt.Errorf("error converting video: %v", err)
+		return fmt.Errorf("failed to read temp directory: %v", err)
 	}
 
-	fmt.Println("video ID:", bot.pl.videoID)
-	return nil
-}
-
-func (bot *Bot) testAudio() error {
-	// Join the voice channel
-	err := bot.handleJoinCommand()
-	if err != nil {
-		return err
-	}
-
-	bot.VoiceConnection.Speaking(true)
-
-	file, err := os.Open("test.dca")
-	if err != nil {
-		fmt.Println("Error opening dca file :", err)
-		return err
-	}
-
-	// Create a DCA decoder to read from the encoded DCA file
-	decoder := dca.NewDecoder(file)
-
-	// Read and stream each Opus frame to Discord
-	for {
-		frame, err := decoder.OpusFrame()
+	for _, file := range files {
+		err := os.Remove(filepath.Join(tempDir, file.Name()))
 		if err != nil {
-			if err != io.EOF {
-				return fmt.Errorf("error reading Opus frame: %v", err)
-			}
-			break // End of audio stream
-		}
-
-		// Send the Opus frame to Discord
-		select {
-		case bot.VoiceConnection.OpusSend <- frame:
-		case <-time.After(time.Second):
-			return fmt.Errorf("timeout sending Opus frame to Discord")
+			fmt.Printf("failed to delete file %s: %v\n", file.Name(), err)
 		}
 	}
 
-	fmt.Println("Audio stream completed successfully")
 	return nil
 }

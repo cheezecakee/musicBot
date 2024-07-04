@@ -17,6 +17,7 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.2 // indirect
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/bitly/go-simplejson v0.5.1 // indirect
+	github.com/bwmarrin/dca v0.0.0-20221003192631-e7cc179f7b56 // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/dop251/goja v0.0.0-20240220182346-e401ed450204 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

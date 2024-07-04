@@ -25,7 +25,7 @@ type Bot struct {
 	State           *discordgo.State
 	VoiceConnection *discordgo.VoiceConnection
 	VoiceState      *discordgo.VoiceState
-	Context         context.Context
+	ctx             context.Context
 	pl              PlayList
 }
 
@@ -33,7 +33,8 @@ type PlayList struct {
 	trackName string
 	track     *spotify.FullTrack
 	videoID   string
-	output    string
+	output    string //.opus
+	path      string //.dca
 }
 
 func Run() {
@@ -43,11 +44,13 @@ func Run() {
 	// Create a new bot instance
 	bot := &Bot{
 		Session: session,
-		Context: context,
+		ctx:     context,
 	}
 
 	// Add an event handler
 	session.AddHandler(bot.newMessage)
+	// session.AddHandler(bot.ready)
+	// session.AddHandler(bot.interactionCreate)
 
 	// Open session
 	err := session.Open()
@@ -57,6 +60,8 @@ func Run() {
 		log.Println("Discord session successfully started.")
 	}
 	defer session.Close()
+
+	// bot.registerCommands(session)
 
 	fmt.Println("Bot running...")
 	c := make(chan os.Signal, 1)
@@ -182,20 +187,12 @@ func (bot *Bot) handleLeaveCommand() {
 
 func (bot *Bot) handlePlayCommand() error {
 	bot.getTrackName()
-	err := bot.downloadAudio()
-	if err != nil {
+	if err := bot.downloadAudio(); err != nil {
 		return err
 	}
 	// Play audio
-	err = bot.streamAudio()
-	if err != nil {
-		bot.sendMessage(fmt.Sprintf("Error: %v", err))
+	if err := bot.streamAudio(); err != nil {
 		return err
 	}
-	// err := bot.testAudio()
-	// if err != nil {
-	// 	return err
-	// }
-	// bot.sendMessage(fmt.Sprintf("Now playing: %s by %s", track.Name, track.Artists[0].Name))
 	return nil
 }

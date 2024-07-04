@@ -5,8 +5,7 @@ import (
 	"fmt"
 )
 
-func SearchVideo(query string) (string, error) {
-	ctx := context.Background()
+func SearchVideo(ctx context.Context, query string) (string, error) {
 	call := Clients.Youtube.Search.List([]string{"id", "snippet"}).Q(query).MaxResults(1)
 	response, err := call.Context(ctx).Do()
 	if err != nil {
