@@ -6,8 +6,8 @@ Not meant for commercial use, just learning how to work with discord bots and ap
 ffmepg
 yt-dpl 
 
-* Put these in a .env file *
-discord Token
-spotify ID
-spotify Secret
-youtube API key
+### Put these in a .env file:
+* Discord Token
+* Spotify ID
+* Spotify Secret
+* Youtube API key
