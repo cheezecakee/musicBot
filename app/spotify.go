@@ -10,7 +10,8 @@ import (
 
 var Clients *auth.Clients
 
-func SearchTrack(ctx context.Context, trackName string) (*spotify.FullTrack, error) {
+func SearchTrack(trackName string) (*spotify.FullTrack, error) {
+	ctx := context.Background()
 	results, err := Clients.Spotify.Search(ctx, trackName, spotify.SearchTypeTrack)
 	if err != nil {
 		return nil, fmt.Errorf("error searching Spotify: %v", err)

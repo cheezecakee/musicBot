@@ -1,8 +1,8 @@
 package bot
 
 import (
-	"context"
 	"discordBot/app/auth"
+	"discordBot/player"
 	"fmt"
 	"log"
 	"os"
@@ -10,47 +10,38 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/zmb3/spotify/v2"
 )
 
-var (
-	Clients *auth.Clients
-	pl      PlayList
-)
+var Clients *auth.Clients
 
 type Bot struct {
+	Clients         *auth.Clients
 	Session         *discordgo.Session
 	Message         *discordgo.MessageCreate
 	Guild           *discordgo.Guild
 	State           *discordgo.State
 	VoiceConnection *discordgo.VoiceConnection
 	VoiceState      *discordgo.VoiceState
-	ctx             context.Context
-	pl              PlayList
-}
-
-type PlayList struct {
-	trackName string
-	track     *spotify.FullTrack
-	videoID   string
-	output    string //.opus
-	path      string //.dca
+	Player          player.Player
+	Queue           player.Queue
+	Song            player.Song
 }
 
 func Run() {
 	session := Clients.Discord
-	context := context.Background()
 
 	// Create a new bot instance
 	bot := &Bot{
 		Session: session,
-		ctx:     context,
+		Player:  player.Player{},
+		Queue:   player.Queue{},
+		Song:    player.Song{},
 	}
 
 	// Add an event handler
 	session.AddHandler(bot.newMessage)
-	// session.AddHandler(bot.ready)
-	// session.AddHandler(bot.interactionCreate)
+	session.AddHandler(bot.ready)
+	session.AddHandler(bot.interactionCreate)
 
 	// Open session
 	err := session.Open()
@@ -61,7 +52,7 @@ func Run() {
 	}
 	defer session.Close()
 
-	// bot.registerCommands(session)
+	bot.registerCommands(session)
 
 	fmt.Println("Bot running...")
 	c := make(chan os.Signal, 1)
@@ -102,10 +93,9 @@ func (bot *Bot) newMessage(session *discordgo.Session, message *discordgo.Messag
 	}
 }
 
-// Find out who the userID is
-func (bot *Bot) getVoiceState() error {
+func (bot *Bot) getVoiceState(userID string) error {
 	for _, vs := range bot.Guild.VoiceStates {
-		if vs.UserID == bot.Message.Author.ID {
+		if vs.UserID == userID {
 			bot.VoiceState = vs
 			return nil
 		}
@@ -119,7 +109,7 @@ func (bot *Bot) getTrackName() {
 		bot.sendMessage("Invalid song name.")
 		return
 	}
-	bot.pl.trackName = trackName
+	bot.Player.Name = trackName
 }
 
 func (bot *Bot) HandleCommand() error {
@@ -129,7 +119,7 @@ func (bot *Bot) HandleCommand() error {
 	case strings.Contains(bot.Message.Content, "!bye"):
 		return bot.handleByeCommand()
 	case strings.Contains(bot.Message.Content, "!join"):
-		if err := bot.handleJoinCommand(); err != nil {
+		if err := bot.handleJoinCommand(bot.Message.Author.ID); err != nil {
 			return err
 		}
 	case strings.Contains(bot.Message.Content, "!leave"):
@@ -154,24 +144,20 @@ func (bot *Bot) handleByeCommand() error {
 	return nil
 }
 
-func (bot *Bot) handleJoinCommand() error {
+func (bot *Bot) handleJoinCommand(userID string) error {
 	// Find the voice state of the user
-	err := bot.getVoiceState()
+	err := bot.getVoiceState(userID)
 	if err != nil {
-		bot.sendMessage("You must be in a voice channel to use this command.")
 		return fmt.Errorf("user not in a voice channel")
 	}
 
 	// Join the voice channel
 	voice, err := bot.Session.ChannelVoiceJoin(bot.Guild.ID, bot.VoiceState.ChannelID, false, false)
 	if err != nil {
-		bot.sendMessage("Failed to join the voice channel.")
 		return fmt.Errorf("failed to join voice channel: %v", err)
 	}
 
 	bot.VoiceConnection = voice
-
-	bot.sendMessage("Joined the voice channel!")
 	return nil
 }
 
@@ -187,12 +173,32 @@ func (bot *Bot) handleLeaveCommand() {
 
 func (bot *Bot) handlePlayCommand() error {
 	bot.getTrackName()
-	if err := bot.downloadAudio(); err != nil {
+	if err := bot.Player.DownloadAudio(); err != nil {
 		return err
 	}
+
+	err := bot.handleJoinCommand(bot.Message.Author.ID)
+	if err != nil {
+		return (err)
+	}
+	bot.sendMessage(fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
 	// Play audio
-	if err := bot.streamAudio(); err != nil {
+	if err := bot.Player.StreamAudio(bot.VoiceConnection, &bot.Queue); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (bot *Bot) playCurrentSong() error {
+	return nil
+}
+
+func (bot *Bot) handleNextCommand() error {
+	bot.Queue.Next()
+	return bot.playCurrentSong()
+}
+
+func (bot *Bot) handlePrevCommand() error {
+	bot.Queue.Previous()
+	return bot.playCurrentSong()
 }

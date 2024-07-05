@@ -1,76 +1,24 @@
-package bot
+package player
 
 import (
 	"discordBot/app"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
-
-	"github.com/jonas747/dca"
 )
 
-func (bot *Bot) streamAudio() error {
-	err := bot.handleJoinCommand()
-	if err != nil {
-		return (err)
-	}
-	bot.VoiceConnection.Speaking(true)
-
-	bot.sendMessage(fmt.Sprintf("Now playing: %s by %s", bot.pl.track.Name, bot.pl.track.Artists[0].Name))
-
-	bot.convertToDCA()
-
-	file, err := os.Open(bot.pl.path)
-	if err != nil {
-		fmt.Println("Error opening dca file :", err)
-		return err
-	}
-
-	// Create a DCA decoder to read from the encoded DCA file
-	decoder := dca.NewDecoder(file)
-
-	// Read and stream each Opus frame to Discord
-	for {
-		frame, err := decoder.OpusFrame()
-		if err != nil {
-			if err != io.EOF {
-				return nil
-			}
-			break // End of audio stream
-		}
-
-		// Send the Opus frame to Discord
-		select {
-		case bot.VoiceConnection.OpusSend <- frame:
-		case <-time.After(time.Second):
-			return nil
-		}
-	}
-
-	bot.VoiceConnection.Disconnect()
-	err = bot.cleanUpDir()
-	if err != nil {
-		fmt.Printf("Failed to clean up temp directory: %v\n", err)
-	}
-
-	fmt.Println("Audio stream completed successfully")
-	return nil
-}
-
-func (bot *Bot) convertToDCA() error {
+func (p *Player) convertToDCA() error {
 	// Construct the ffmpeg command to convert the audio file to DCA format
-	cmd := exec.Command("ffmpeg", "-i", bot.pl.output, "-f", "s16le", "-ac", "2", "-ar", "48000", "-acodec", "pcm_s16le", "-")
+	cmd := exec.Command("ffmpeg", "-i", p.OpusPath, "-f", "s16le", "-ac", "2", "-ar", "48000", "-acodec", "pcm_s16le", "-")
 
 	// Create path with song name
-	bot.pl.path = "./player/" + bot.pl.track.Name + ".dca"
+	p.DcaPath = "./player/temp/" + p.Track.Name + ".dca"
 
 	// Pipe the output to dca
 	dcaCmd := exec.Command("dca")
 	dcaCmd.Stdin, _ = cmd.StdoutPipe()
-	dcaCmd.Stdout, _ = os.Create(bot.pl.path)
+	dcaCmd.Stdout, _ = os.Create(p.DcaPath)
 
 	// Start the ffmpeg command
 	if err := cmd.Start(); err != nil {
@@ -92,28 +40,28 @@ func (bot *Bot) convertToDCA() error {
 		return fmt.Errorf("dca command failed: %v", err)
 	}
 
-	fmt.Println(bot.pl.output)
+	fmt.Println(p.DcaPath)
 
 	fmt.Println("Conversion to DCA completed successfully")
 	return nil
 }
 
-func (bot *Bot) downloadAudio() error {
+func (p *Player) DownloadAudio() error {
 	// Search for the track on Spotify
-	track, err := app.SearchTrack(bot.ctx, bot.pl.trackName)
+	track, err := app.SearchTrack(p.Name)
 	if err != nil {
 		return fmt.Errorf("error searching track: %v", err)
 	}
-	bot.pl.track = track
+	p.Track = track
 	// Use the track name and artist for the Youtube search query
-	query := fmt.Sprintf("%s %s official", track.Name, track.Artists[0].Name)
-	bot.pl.videoID, err = app.SearchVideo(bot.ctx, query)
+	query := fmt.Sprintf("%s %s official audio lyric", track.Name, track.Artists[0].Name)
+	p.VideoID, err = app.SearchVideo(query)
 	if err != nil {
 		return fmt.Errorf("error search video: %v", err)
 	}
 
 	// Convert the video to audio
-	err = bot.convertVideo()
+	err = p.convertVideo()
 	if err != nil {
 		return fmt.Errorf("error converting video: %v", err)
 	}
@@ -122,9 +70,9 @@ func (bot *Bot) downloadAudio() error {
 	return nil
 }
 
-func (bot *Bot) convertVideo() error {
+func (p *Player) convertVideo() error {
 	// Construst the download URL
-	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", bot.pl.videoID)
+	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", p.VideoID)
 
 	youtubeDownloader, err := exec.LookPath("yt-dlp")
 	if err != nil {
@@ -137,17 +85,17 @@ func (bot *Bot) convertVideo() error {
 		return fmt.Errorf("failed to create temporary directory: %v", err)
 	}
 
-	song := bot.pl.track.Name + ".opus"
+	song := p.Track.Name + ".opus"
 
 	// Define the output path
-	bot.pl.output = filepath.Join(tempDir, song)
+	p.OpusPath = filepath.Join(tempDir, song)
 
 	// Define the yt-dpl command arguments
 	args := []string{
 		url,
 		"--extract-audio",
 		"--audio-format", "opus",
-		"--output", bot.pl.output,
+		"--output", p.OpusPath,
 		"--quiet",
 		"--no-playlist",
 		"--ignore-errors", // Ignores unavailable videos
@@ -164,7 +112,8 @@ func (bot *Bot) convertVideo() error {
 	return nil
 }
 
-func (bot *Bot) cleanUpDir() error {
+// Delete songs after it's done playing
+func cleanUpDir() error {
 	tempDir := "./player"
 	dir, err := os.Open(tempDir)
 	if err != nil {

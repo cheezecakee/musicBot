@@ -17,7 +17,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error initializing clients: %v", err)
 	}
-	log.Println(clients)
+	// log.Println(clients)
 
 	bot.Clients = clients
 	app.Clients = clients
