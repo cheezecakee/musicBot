@@ -24,15 +24,15 @@ func (bot *Bot) interactionCreate(s *discordgo.Session, i *discordgo.Interaction
 			})
 
 		case "play":
-			bot.play(i)
+			bot.setup(i)
+			bot.playCommand(i)
 		case "queue":
 			bot.sendResponse(i.Interaction, bot.Queue.String())
 		case "skip":
-			bot.Queue.Next()
-			bot.sendResponse(i.Interaction, fmt.Sprintf("Skipped to: %s", bot.Queue.CurrentSong().Name))
+			bot.skipCommand(i)
 		case "prev":
 			bot.Queue.Previous()
-			bot.sendResponse(i.Interaction, fmt.Sprintf("Back to: %s", bot.Queue.CurrentSong().Name))
+			bot.sendResponse(i.Interaction, fmt.Sprintf("Back to: %s", bot.Queue.GetCurrentSong().Name))
 		case "remove":
 			index := int(i.ApplicationCommandData().Options[0].IntValue())
 			bot.Queue.RemoveSong(index)
@@ -52,8 +52,8 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 			Description: "Play a song",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
-					Name:        "track",
-					Description: "The name of the track to play",
+					Name:        "song",
+					Description: "The name of the song to play",
 					Type:        discordgo.ApplicationCommandOptionString,
 					Required:    true,
 				},
@@ -120,9 +120,29 @@ func (bot *Bot) sendResponse(i *discordgo.Interaction, response string) {
 	}
 }
 
-func (bot *Bot) play(i *discordgo.InteractionCreate) {
-	trackName := i.ApplicationCommandData().Options[0].StringValue()
+func (bot *Bot) playCommand(i *discordgo.InteractionCreate) {
 	userID := i.Member.User.ID
+
+	// Send the now playing or added to queue message
+	if len(bot.Queue.Songs) == 1 {
+		bot.sendResponse(i.Interaction, fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+	} else {
+		bot.sendResponse(i.Interaction, fmt.Sprintf("Added to queue: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+	}
+
+	if err := bot.handleJoinCommand(userID); err != nil {
+		bot.sendResponse(i.Interaction, fmt.Sprintf("Error: %v", err))
+		return
+	}
+
+	// Start streaming if not already playing
+	if len(bot.Queue.Songs) == 1 {
+		bot.Player.Play(bot.VoiceConnection, &bot.Queue)
+	}
+}
+
+func (bot *Bot) setup(i *discordgo.InteractionCreate) {
+	trackName := i.ApplicationCommandData().Options[0].StringValue()
 
 	// Acknowledge the interaction
 	err := bot.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -138,38 +158,36 @@ func (bot *Bot) play(i *discordgo.InteractionCreate) {
 
 	// Set the track name
 	bot.Player.Name = trackName
+	if err := bot.Player.DownloadAudio(); err != nil {
+		bot.sendResponse(i.Interaction, fmt.Sprintf("Error: %v", err))
+		return
+	}
 
-	// Download audio in a separate goroutine
-	go func() {
-		if err := bot.Player.DownloadAudio(); err != nil {
-			bot.sendResponse(i.Interaction, fmt.Sprintf("Error: %v", err))
-			return
-		}
+	// Download Audio DCA file
+	err = bot.Player.ConvertToDCA()
+	if err != nil {
+		fmt.Printf("Error converting video: %v\n", err)
+		return
+	}
 
-		// Add song to queue
-		bot.Queue.AddSong(player.Song{Name: bot.Player.Track.Name, Artist: bot.Player.Track.Artists[0].Name, URL: bot.Player.VideoID})
+	// Add song to queue with DcaPath
+	bot.Queue.AddSong(player.Song{Name: bot.Player.Track.Name, Artist: bot.Player.Track.Artists[0].Name, DcaPath: bot.Player.DcaPath})
+}
 
-		// Send the now playing or added to queue message
-		if bot.Queue.Current == len(bot.Queue.Songs)-1 {
-			bot.sendResponse(i.Interaction, fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
-		} else {
-			bot.sendResponse(i.Interaction, fmt.Sprintf("Added to queue: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
-		}
+func (bot *Bot) skipCommand(i *discordgo.InteractionCreate) {
+	// Acknowledge the interaction immediately to avoid multiple responses
+	err := bot.Session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "Skipping the current song...",
+		},
+	})
+	if err != nil {
+		log.Printf("Cannot send response: %v", err)
+		return
+	}
 
-		// Join the voice channel if not already connected
-		if bot.VoiceConnection == nil || bot.VoiceConnection.ChannelID == "" {
-			if err := bot.handleJoinCommand(userID); err != nil {
-				bot.sendResponse(i.Interaction, fmt.Sprintf("Error: %v", err))
-				return
-			}
-		}
-
-		// Start streaming if not already playing
-		if len(bot.Queue.Songs) == 1 {
-			if err := bot.Player.StreamAudio(bot.VoiceConnection, &bot.Queue); err != nil {
-				bot.sendResponse(i.Interaction, fmt.Sprintf("Error: %v", err))
-				return
-			}
-		}
-	}()
+	bot.Queue.Next()
+	// Send skip signal
+	bot.Player.Skip <- true
 }

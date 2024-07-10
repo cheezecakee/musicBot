@@ -25,6 +25,9 @@ type Bot struct {
 	Player          player.Player
 	Queue           player.Queue
 	Song            player.Song
+	SkipCh          chan struct{}
+	PrevCh          chan struct{}
+	RemoveCh        chan struct{}
 }
 
 func Run() {
@@ -33,9 +36,11 @@ func Run() {
 	// Create a new bot instance
 	bot := &Bot{
 		Session: session,
-		Player:  player.Player{},
-		Queue:   player.Queue{},
-		Song:    player.Song{},
+		Player: player.Player{
+			Skip: make(chan bool),
+		},
+		Queue: player.Queue{},
+		Song:  player.Song{},
 	}
 
 	// Add an event handler
@@ -183,9 +188,8 @@ func (bot *Bot) handlePlayCommand() error {
 	}
 	bot.sendMessage(fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
 	// Play audio
-	if err := bot.Player.StreamAudio(bot.VoiceConnection, &bot.Queue); err != nil {
-		return err
-	}
+	bot.Player.Play(bot.VoiceConnection, &bot.Queue)
+
 	return nil
 }
 

@@ -6,9 +6,10 @@ import (
 )
 
 type Song struct {
-	Name   string
-	Artist string
-	URL    string
+	ID      int
+	Name    string
+	Artist  string
+	DcaPath string
 }
 
 type Queue struct {
@@ -16,7 +17,9 @@ type Queue struct {
 	Current int
 }
 
+// AddSong adds a song to the queue with an incremented ID
 func (q *Queue) AddSong(song Song) {
+	song.ID = len(q.Songs) + 1
 	q.Songs = append(q.Songs, song)
 }
 
@@ -32,11 +35,11 @@ func (q *Queue) Previous() {
 	}
 }
 
-func (q *Queue) CurrentSong() *Song {
-	if len(q.Songs) == 0 {
-		return nil
+func (q *Queue) GetCurrentSong() *Song {
+	if q.Current < len(q.Songs) {
+		return &q.Songs[q.Current]
 	}
-	return &q.Songs[q.Current]
+	return nil
 }
 
 func (q *Queue) RemoveSong(index int) {

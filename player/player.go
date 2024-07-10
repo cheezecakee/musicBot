@@ -3,6 +3,7 @@ package player
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"time"
 
@@ -17,60 +18,62 @@ type Player struct {
 	VideoID  string
 	OpusPath string
 	DcaPath  string
+	Skip     chan bool
 }
 
-func (p *Player) StreamAudio(vc *discordgo.VoiceConnection, q *Queue) error {
-	for q.Current < len(q.Songs) {
-		// Prepare the current song
-		currentSong := q.CurrentSong()
+func NewPlayer() *Player {
+	return &Player{
+		Skip: make(chan bool),
+	}
+}
+
+func (p *Player) Play(vc *discordgo.VoiceConnection, q *Queue) error {
+	for {
+		currentSong := q.GetCurrentSong()
 		if currentSong == nil {
-			break
+			return nil
 		}
+		log.Println(currentSong)
 
-		// Set the DCA path based on the current song
-		p.DcaPath = fmt.Sprintf("%s.dca", currentSong.Name)
-
-		// Ensure the DCA file exists
-		err := p.convertToDCA()
-		if err != nil {
-			fmt.Printf("Error converting video: %v\n", err)
-			return err
-		}
-
-		file, err := os.Open(p.DcaPath)
+		dcaPath := currentSong.DcaPath
+		file, err := os.Open(dcaPath)
 		if err != nil {
 			fmt.Println("Error opening dca file:", err)
 			return err
 		}
+		defer file.Close()
 
-		// Create a DCA decoder to read from the encoded DCA file
 		decoder := dca.NewDecoder(file)
 		vc.Speaking(true)
+		defer vc.Speaking(false)
 
-		// Read and stream each Opus frame to Discord
-		for {
-			frame, err := decoder.OpusFrame()
-			if err != nil {
-				if err != io.EOF {
-					return nil
-				}
-				break // End of audio stream
-			}
+		p.stream(vc, decoder)
 
-			// Send the Opus frame to Discord
-			select {
-			case vc.OpusSend <- frame:
-			case <-time.After(time.Second):
-				return nil
-			}
-		}
-
-		vc.Speaking(false)
-		file.Close()
-		q.Next() // Move to the next song in the queue
+		// After finishing current song or skip signal, move to the next song
+		q.Next()
+		log.Println("Moving to next song")
 	}
+}
 
-	vc.Disconnect()
-	fmt.Println("Audio stream completed successfully")
+func (p *Player) stream(vc *discordgo.VoiceConnection, decoder *dca.Decoder) error {
+	for {
+		frame, err := decoder.OpusFrame()
+		if err != nil {
+			if err != io.EOF {
+				return err
+			}
+			break
+		}
+		select {
+		case vc.OpusSend <- frame:
+			// Send the audio frame to the voice connection
+		case <-p.Skip:
+			log.Println("Skip signal received, skipping to next song")
+			return nil // Break the inner loop to continue with the next song
+		case <-time.After(time.Second):
+			// Timeout case if no action occurs within 1 second
+			return nil
+		}
+	}
 	return nil
 }

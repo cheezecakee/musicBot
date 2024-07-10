@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-func (p *Player) convertToDCA() error {
+func (p *Player) ConvertToDCA() error {
 	// Construct the ffmpeg command to convert the audio file to DCA format
 	cmd := exec.Command("ffmpeg", "-i", p.OpusPath, "-f", "s16le", "-ac", "2", "-ar", "48000", "-acodec", "pcm_s16le", "-")
 
@@ -40,9 +40,9 @@ func (p *Player) convertToDCA() error {
 		return fmt.Errorf("dca command failed: %v", err)
 	}
 
-	fmt.Println(p.DcaPath)
+	// fmt.Println(p.DcaPath)
 
-	fmt.Println("Conversion to DCA completed successfully")
+	// fmt.Println("Conversion to DCA completed successfully")
 	return nil
 }
 
