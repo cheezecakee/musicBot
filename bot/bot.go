@@ -25,9 +25,6 @@ type Bot struct {
 	Player          player.Player
 	Queue           player.Queue
 	Song            player.Song
-	SkipCh          chan struct{}
-	PrevCh          chan struct{}
-	RemoveCh        chan struct{}
 }
 
 func Run() {
@@ -38,6 +35,7 @@ func Run() {
 		Session: session,
 		Player: player.Player{
 			Skip: make(chan bool),
+			Prev: make(chan bool),
 		},
 		Queue: player.Queue{},
 		Song:  player.Song{},

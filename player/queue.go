@@ -30,7 +30,7 @@ func (q *Queue) Next() {
 }
 
 func (q *Queue) Previous() {
-	if q.Current < 0 {
+	if q.Current > 0 {
 		q.Current--
 	}
 }
@@ -43,10 +43,12 @@ func (q *Queue) GetCurrentSong() *Song {
 }
 
 func (q *Queue) RemoveSong(index int) {
-	if index < 0 || index >= len(q.Songs) {
-		return
+	if index >= 0 && index < len(q.Songs) {
+		q.Songs = append(q.Songs[:index], q.Songs[index+1:]...)
+		if q.Current >= index {
+			q.Current--
+		}
 	}
-	q.Songs = append(q.Songs[:index], q.Songs[index+1:]...)
 }
 
 func (q *Queue) String() string {
