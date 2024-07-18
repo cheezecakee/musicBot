@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/jonas747/dca"
+	"github.com/jogramming/dca"
 	"github.com/zmb3/spotify/v2"
 )
 

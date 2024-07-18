@@ -176,9 +176,6 @@ func (bot *Bot) handleLeaveCommand() {
 
 func (bot *Bot) handlePlayCommand() error {
 	bot.getTrackName()
-	if err := bot.Player.DownloadAudio(); err != nil {
-		return err
-	}
 
 	err := bot.handleJoinCommand(bot.Message.Author.ID)
 	if err != nil {

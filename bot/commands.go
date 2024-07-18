@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"discordBot/player"
 	"fmt"
 	"log"
 
@@ -16,10 +15,8 @@ func (bot *Bot) interactionCreate(s *discordgo.Session, i *discordgo.Interaction
 	if i.Type == discordgo.InteractionApplicationCommand {
 		switch i.ApplicationCommandData().Name {
 		case "play":
-			// Acknowledge the interaction
 			bot.sendResponse(i.Interaction, "Processing...")
-			bot.setup(i)
-			bot.playCommand(i)
+			bot.play(i)
 		case "queue":
 			bot.queueCommand(i.Interaction, bot.Queue.String())
 		case "skip":
@@ -144,51 +141,6 @@ func (bot *Bot) removeCommand(i *discordgo.InteractionCreate) {
 	bot.sendFollowUp(i, fmt.Sprintf("Removed song %s by %s", song.Name, song.Artist))
 }
 
-func (bot *Bot) playCommand(i *discordgo.InteractionCreate) {
-	userID := i.Member.User.ID
-
-	if err := bot.handleJoinCommand(userID); err != nil {
-		log.Printf("Error in handleJoinCommand: %v", err)
-		return
-	}
-
-	// Start streaming if not already playing
-	if len(bot.Queue.Songs) == 1 {
-		log.Println("Starting to play song")
-		bot.Player.Play(bot.VoiceConnection, &bot.Queue)
-	}
-}
-
-func (bot *Bot) setup(i *discordgo.InteractionCreate) {
-	trackName := i.ApplicationCommandData().Options[0].StringValue()
-	log.Println("setup invoked")
-
-	log.Println("Downloading audio")
-	bot.Player.Name = trackName
-	if err := bot.Player.DownloadAudio(); err != nil {
-		log.Printf("Error in DownloadAudio: %v", err)
-		return
-	}
-
-	log.Println("Converting audio to DCA")
-	err := bot.Player.ConvertToDCA()
-	if err != nil {
-		log.Printf("Error converting video: %v", err)
-		return
-	}
-
-	log.Println("Adding song to queue")
-	bot.Queue.AddSong(player.Song{Name: bot.Player.Track.Name, Artist: bot.Player.Track.Artists[0].Name, DcaPath: bot.Player.DcaPath})
-
-	if len(bot.Queue.Songs) == 1 {
-		log.Println("Now playing")
-		bot.sendFollowUp(i, fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
-	} else {
-		log.Println("Added to queue")
-		bot.sendFollowUp(i, fmt.Sprintf("Added to queue: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
-	}
-}
-
 func (bot *Bot) skipCommand(i *discordgo.InteractionCreate) {
 	go func() { // Ensure this runs asynchronously
 		// Send skip signal
@@ -203,4 +155,30 @@ func (bot *Bot) prevCommand(i *discordgo.InteractionCreate) {
 		bot.Player.Prev <- true
 	}()
 	bot.sendFollowUp(i, fmt.Sprintf("Going back to the previous song: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+}
+
+func (bot *Bot) play(i *discordgo.InteractionCreate) {
+	userID := i.Member.User.ID
+	trackName := i.ApplicationCommandData().Options[0].StringValue()
+	log.Println("play invoked")
+
+	bot.Player.Name = trackName
+
+	// Join the voice channel
+	if err := bot.handleJoinCommand(userID); err != nil {
+		log.Printf("Error in handleJoinCommand: %v", err)
+		return
+	}
+
+	// Set the bot to speaking
+	if bot.VoiceConnection == nil || !bot.VoiceConnection.Ready {
+		log.Println("Voice connection not ready")
+		return
+	}
+
+	// Set the track name and stream audio
+	bot.Player.DCA(bot.VoiceConnection)
+
+	log.Println("Finished")
+	bot.sendFollowUp(i, fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
 }

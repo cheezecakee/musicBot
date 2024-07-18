@@ -3,135 +3,96 @@ package player
 import (
 	"discordBot/app"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"io"
+	"log"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/cheezecakee/dca"
+	ytdl "github.com/kkdai/youtube/v2"
 )
 
-func (p *Player) ConvertToDCA() error {
-	// Construct the ffmpeg command to convert the audio file to DCA format
-	cmd := exec.Command("ffmpeg", "-i", p.OpusPath, "-f", "s16le", "-ac", "2", "-ar", "48000", "-acodec", "pcm_s16le", "-")
-
-	// Create path with song name
-	p.DcaPath = "./player/temp/" + p.Track.Name + ".dca"
-
-	// Pipe the output to dca
-	dcaCmd := exec.Command("dca")
-	dcaCmd.Stdin, _ = cmd.StdoutPipe()
-	dcaCmd.Stdout, _ = os.Create(p.DcaPath)
-
-	// Start the ffmpeg command
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start ffmpeg command: %v", err)
-	}
-
-	// Start the dca command
-	if err := dcaCmd.Start(); err != nil {
-		return fmt.Errorf("failed to start dca command: %v", err)
-	}
-
-	// Wait for ffmpeg to finish
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("ffmpeg command failed: %v", err)
-	}
-
-	// Wait for dca to finish
-	if err := dcaCmd.Wait(); err != nil {
-		return fmt.Errorf("dca command failed: %v", err)
-	}
-
-	// fmt.Println(p.DcaPath)
-
-	// fmt.Println("Conversion to DCA completed successfully")
-	return nil
+// Frame represents a single audio frame
+type Frame struct {
+	data     []byte
+	metaData bool
 }
 
-func (p *Player) DownloadAudio() error {
+// EncodeSession represents the session for encoding and streaming
+type EncodeSession struct {
+	frameChannel chan *Frame
+}
+
+func (p *Player) find() {
 	// Search for the track on Spotify
 	track, err := app.SearchTrack(p.Name)
 	if err != nil {
-		return fmt.Errorf("error searching track: %v", err)
+		fmt.Printf("error searching track: %v\n", err)
 	}
 	p.Track = track
+
 	// Use the track name and artist for the Youtube search query
 	query := fmt.Sprintf("%s %s official audio lyric", track.Name, track.Artists[0].Name)
 	p.VideoID, err = app.SearchVideo(query)
 	if err != nil {
-		return fmt.Errorf("error search video: %v", err)
+		fmt.Printf("error searching video: %v\n", err)
 	}
-
-	// Convert the video to audio
-	err = p.convertVideo()
-	if err != nil {
-		return fmt.Errorf("error converting video: %v", err)
-	}
-
-	// fmt.Println("video ID:", bot.pl.videoID)
-	return nil
 }
 
-func (p *Player) convertVideo() error {
-	// Construst the download URL
-	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", p.VideoID)
-
-	youtubeDownloader, err := exec.LookPath("yt-dlp")
+func (p *Player) DCA(vc *discordgo.VoiceConnection) {
+	// Encode audio from the URL
+	encodeSession, err := dca.EncodeFile(p.url(), dca.StdEncodeOptions)
 	if err != nil {
-		fmt.Println("yt-dlp not found in path.")
+		log.Fatal("Failed creating an encoding session: ", err)
 	}
+	log.Println("encodeSession opts:", encodeSession.Options())
 
-	// Create a temporary directory for the song
-	tempDir := filepath.Join("player", "temp")
-	if err := os.MkdirAll(tempDir, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create temporary directory: %v", err)
-	}
+	log.Println("encodeSession")
+	fmt.Printf("\n%+v\n", encodeSession)
 
-	song := p.Track.Name + ".opus"
+	done := make(chan error)
+	stream := dca.NewStream(encodeSession, vc, done)
 
-	// Define the output path
-	p.OpusPath = filepath.Join(tempDir, song)
+	ticker := time.NewTicker(time.Second)
 
-	// Define the yt-dpl command arguments
-	args := []string{
-		url,
-		"--extract-audio",
-		"--audio-format", "opus",
-		"--output", p.OpusPath,
-		"--quiet",
-		"--no-playlist",
-		"--ignore-errors", // Ignores unavailable videos
-		"--no-warnings",
-	}
+	for {
+		select {
+		case err := <-done:
+			if err != nil && err != io.EOF {
+				log.Fatal("An error occured", err)
+			}
 
-	// Execute the yt-dpl command
-	cmd := exec.Command(youtubeDownloader, args...)
-	err = cmd.Run()
-	if err != nil {
-		return fmt.Errorf("failed to download and convert video: %v", err)
-	}
-
-	return nil
-}
-
-// Delete songs after it's done playing
-func cleanUpDir() error {
-	tempDir := "./player"
-	dir, err := os.Open(tempDir)
-	if err != nil {
-		return fmt.Errorf("failed to open temp directory: %v", err)
-	}
-	defer dir.Close()
-
-	files, err := dir.Readdir(0)
-	if err != nil {
-		return fmt.Errorf("failed to read temp directory: %v", err)
-	}
-
-	for _, file := range files {
-		err := os.Remove(filepath.Join(tempDir, file.Name()))
-		if err != nil {
-			fmt.Printf("failed to delete file %s: %v\n", file.Name(), err)
+			// Clean up incase something happened and ffmpeg is still running
+			encodeSession.Truncate()
+			return
+		case <-ticker.C:
+			stream.PlaybackPosition()
 		}
 	}
+}
 
-	return nil
+// Method to get the direct audio stream URL from YouTube using yt-dlp and stream it to Discord
+func (p *Player) url() string {
+	p.find()
+	// Create a new YouTube client
+	client := ytdl.Client{}
+
+	// Get video information from YouTube
+	video, err := client.GetVideo(p.VideoID)
+	if err != nil {
+		log.Printf("Error getting video info: %v\n", err)
+	}
+	log.Printf("Video Name: %v\n", video.Title)
+	log.Printf("Video Duration: %v\n", video.Duration)
+	log.Printf("Video ID: %v\n", video.ID)
+
+	formats := video.Formats.WithAudioChannels().Itag(140)
+	streamURL, err := client.GetStreamURL(video, &formats[0])
+	if err != nil {
+		panic(err)
+	}
+	log.Println("formats")
+	log.Printf("%+v\n\n", formats)
+
+	return streamURL
 }
