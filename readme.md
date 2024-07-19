@@ -11,3 +11,14 @@ yt-dpl
 * Spotify ID
 * Spotify Secret
 * Youtube API key
+
+### How to use
+Use the / command to start using 
+Available commands:
+* Play
+* Skip
+* Prev
+* Queue
+* Pause (Currently Unavailable)
+* Resume (Currently Unavailable) 
+

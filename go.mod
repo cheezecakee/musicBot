@@ -5,7 +5,6 @@ go 1.22.3
 require (
 	github.com/bwmarrin/discordgo v0.28.1
 	github.com/cheezecakee/dca v0.0.0-20240716181045-ef6640849302
-	github.com/jogramming/dca v0.0.0-20210930103944-155f5e5f0cc7
 	github.com/joho/godotenv v1.5.1
 	github.com/kkdai/youtube/v2 v2.10.1
 	github.com/zmb3/spotify/v2 v2.4.2
@@ -35,7 +34,6 @@ require (
 	github.com/googleapis/gax-go/v2 v2.12.5 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jogramming/ogg v0.0.0-20161220051205-b4f6f4cf3757 // indirect
-	github.com/jonas747/ogg v0.0.0-20161220051205-b4f6f4cf3757 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
 	go.opentelemetry.io/otel v1.24.0 // indirect

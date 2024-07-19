@@ -6,10 +6,10 @@ import (
 )
 
 type Song struct {
-	ID      int
-	Name    string
-	Artist  string
-	DcaPath string
+	ID     int
+	Name   string
+	Artist string
+	Url    string
 }
 
 type Queue struct {

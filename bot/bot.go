@@ -125,12 +125,6 @@ func (bot *Bot) HandleCommand() error {
 		if err := bot.handleJoinCommand(bot.Message.Author.ID); err != nil {
 			return err
 		}
-	case strings.Contains(bot.Message.Content, "!leave"):
-		bot.handleLeaveCommand()
-	case strings.Contains(bot.Message.Content, "!play"):
-		if err := bot.handlePlayCommand(); err != nil {
-			return err
-		}
 	default:
 		return nil
 	}
@@ -138,7 +132,7 @@ func (bot *Bot) HandleCommand() error {
 }
 
 func (bot *Bot) handleHelloCommand() error {
-	bot.sendMessage("Hello World 😃")
+	bot.sendMessage("Hello! use the / command for more!😃")
 	return nil
 }
 
@@ -172,32 +166,4 @@ func (bot *Bot) handleLeaveCommand() {
 	} else {
 		bot.sendMessage("I'm not in a voice channel.")
 	}
-}
-
-func (bot *Bot) handlePlayCommand() error {
-	bot.getTrackName()
-
-	err := bot.handleJoinCommand(bot.Message.Author.ID)
-	if err != nil {
-		return (err)
-	}
-	bot.sendMessage(fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
-	// Play audio
-	bot.Player.Play(bot.VoiceConnection, &bot.Queue)
-
-	return nil
-}
-
-func (bot *Bot) playCurrentSong() error {
-	return nil
-}
-
-func (bot *Bot) handleNextCommand() error {
-	bot.Queue.Next()
-	return bot.playCurrentSong()
-}
-
-func (bot *Bot) handlePrevCommand() error {
-	bot.Queue.Previous()
-	return bot.playCurrentSong()
 }

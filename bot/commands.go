@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"discordBot/player"
 	"fmt"
 	"log"
 
@@ -16,7 +17,8 @@ func (bot *Bot) interactionCreate(s *discordgo.Session, i *discordgo.Interaction
 		switch i.ApplicationCommandData().Name {
 		case "play":
 			bot.sendResponse(i.Interaction, "Processing...")
-			bot.play(i)
+			bot.setup(i)
+			bot.playCommand(i)
 		case "queue":
 			bot.queueCommand(i.Interaction, bot.Queue.String())
 		case "skip":
@@ -55,6 +57,14 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 			Description: "Show the current queue",
 		},
 		{
+			Name:        "pause",
+			Description: "Pause song",
+		},
+		{
+			Name:        "resume",
+			Description: "Resume song",
+		},
+		{
 			Name:        "skip",
 			Description: "Skip to the next song in the queue",
 		},
@@ -77,6 +87,7 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 	}
 
 	for _, v := range commands {
+		log.Printf("Registering command: %v", v.Name) // Add this line for debugging
 		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", v)
 		if err != nil {
 			fmt.Printf("Cannot create '%v' command: %v\n", v.Name, err)
@@ -141,9 +152,24 @@ func (bot *Bot) removeCommand(i *discordgo.InteractionCreate) {
 	bot.sendFollowUp(i, fmt.Sprintf("Removed song %s by %s", song.Name, song.Artist))
 }
 
+func (bot *Bot) pauseCommand(i *discordgo.InteractionCreate) {
+	go func() {
+		bot.Player.Pause <- true
+	}()
+
+	bot.sendFollowUp(i, "Song Paused")
+}
+
+func (bot *Bot) resumeCommand(i *discordgo.InteractionCreate) {
+	go func() {
+		bot.Player.Resume <- true
+	}()
+
+	bot.sendFollowUp(i, "Resuming Song")
+}
+
 func (bot *Bot) skipCommand(i *discordgo.InteractionCreate) {
-	go func() { // Ensure this runs asynchronously
-		// Send skip signal
+	go func() {
 		bot.Player.Skip <- true
 	}()
 
@@ -157,28 +183,35 @@ func (bot *Bot) prevCommand(i *discordgo.InteractionCreate) {
 	bot.sendFollowUp(i, fmt.Sprintf("Going back to the previous song: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
 }
 
-func (bot *Bot) play(i *discordgo.InteractionCreate) {
+func (bot *Bot) playCommand(i *discordgo.InteractionCreate) {
 	userID := i.Member.User.ID
-	trackName := i.ApplicationCommandData().Options[0].StringValue()
-	log.Println("play invoked")
 
-	bot.Player.Name = trackName
-
-	// Join the voice channel
 	if err := bot.handleJoinCommand(userID); err != nil {
 		log.Printf("Error in handleJoinCommand: %v", err)
 		return
 	}
 
-	// Set the bot to speaking
-	if bot.VoiceConnection == nil || !bot.VoiceConnection.Ready {
-		log.Println("Voice connection not ready")
-		return
+	// Start streaming if not already playing
+	if len(bot.Queue.Songs) == 1 {
+		bot.Player.Stream(bot.VoiceConnection, &bot.Queue)
 	}
+}
 
-	// Set the track name and stream audio
-	bot.Player.DCA(bot.VoiceConnection)
+func (bot *Bot) setup(i *discordgo.InteractionCreate) {
+	trackName := i.ApplicationCommandData().Options[0].StringValue()
+	bot.Player.Name = trackName
+	log.Println("setup invoked")
 
-	log.Println("Finished")
-	bot.sendFollowUp(i, fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+	bot.Player.Find()
+
+	log.Println("Adding song to queue")
+	bot.Queue.AddSong(player.Song{Name: bot.Player.Track.Name, Artist: bot.Player.Track.Artists[0].Name, Url: bot.Player.VideoID})
+
+	if len(bot.Queue.Songs) == 1 {
+		log.Println("Now playing")
+		bot.sendFollowUp(i, fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+	} else {
+		log.Println("Added to queue")
+		bot.sendFollowUp(i, fmt.Sprintf("Added to queue: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+	}
 }
