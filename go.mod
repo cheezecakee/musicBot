@@ -12,8 +12,6 @@ require (
 	google.golang.org/api v0.186.0
 )
 
-replace github.com/cheezecakee/dca => C:/Users/NotMyPc/Documents/Projects/go/dca
-
 require (
 	cloud.google.com/go/auth v0.6.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.2 // indirect
