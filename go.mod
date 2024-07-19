@@ -4,7 +4,7 @@ go 1.22.3
 
 require (
 	github.com/bwmarrin/discordgo v0.28.1
-	github.com/cheezecakee/dca v0.0.0-20240716181045-ef6640849302
+	github.com/cheezecakee/dca v0.0.0-20240719054236-af909e3633f3
 	github.com/joho/godotenv v1.5.1
 	github.com/kkdai/youtube/v2 v2.10.1
 	github.com/zmb3/spotify/v2 v2.4.2
