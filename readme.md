@@ -19,6 +19,7 @@ Available commands:
 * Skip
 * Prev
 * Queue
-* Pause (Currently Unavailable)
-* Resume (Currently Unavailable) 
+* Pause 
+* Resume 
+* Stop
 

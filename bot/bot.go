@@ -30,12 +30,14 @@ type Bot struct {
 func Run() {
 	session := Clients.Discord
 
-	// Create a new bot instance
 	bot := &Bot{
 		Session: session,
 		Player: player.Player{
-			Skip: make(chan bool),
-			Prev: make(chan bool),
+			Skip:   make(chan bool),
+			Prev:   make(chan bool),
+			Pause:  make(chan bool),
+			Resume: make(chan bool),
+			Stop:   make(chan bool),
 		},
 		Queue: player.Queue{},
 		Song:  player.Song{},

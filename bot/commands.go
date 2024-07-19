@@ -4,6 +4,7 @@ import (
 	"discordBot/player"
 	"fmt"
 	"log"
+	"sync"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -21,6 +22,15 @@ func (bot *Bot) interactionCreate(s *discordgo.Session, i *discordgo.Interaction
 			bot.playCommand(i)
 		case "queue":
 			bot.queueCommand(i.Interaction, bot.Queue.String())
+		case "stop":
+			bot.sendResponse(i.Interaction, "Processing...")
+			bot.stopCommand(i)
+		case "pause":
+			bot.sendResponse(i.Interaction, "Processing...")
+			bot.pauseCommand(i)
+		case "resume":
+			bot.sendResponse(i.Interaction, "Processing...")
+			bot.resumeCommand(i)
 		case "skip":
 			bot.sendResponse(i.Interaction, "Processing...")
 			bot.skipCommand(i)
@@ -57,6 +67,10 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 			Description: "Show the current queue",
 		},
 		{
+			Name:        "stop",
+			Description: "Stops song and disconnects musicBot",
+		},
+		{
 			Name:        "pause",
 			Description: "Pause song",
 		},
@@ -86,13 +100,22 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 		},
 	}
 
-	for _, v := range commands {
-		log.Printf("Registering command: %v", v.Name) // Add this line for debugging
-		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", v)
-		if err != nil {
-			fmt.Printf("Cannot create '%v' command: %v\n", v.Name, err)
-		}
+	var wg sync.WaitGroup
+
+	for _, cmd := range commands {
+		wg.Add(1)
+		go func(command *discordgo.ApplicationCommand) {
+			defer wg.Done()
+			log.Printf("Registering command: %v", command.Name) // Add this line for debugging
+			_, err := s.ApplicationCommandCreate(s.State.User.ID, "", command)
+			if err != nil {
+				fmt.Printf("Cannot create '%v' command: %v\n", command.Name, err)
+			}
+		}(cmd)
 	}
+
+	wg.Wait()
+	log.Println("All commands registered")
 }
 
 func (bot *Bot) unregisterCommands(s *discordgo.Session) {
@@ -150,6 +173,14 @@ func (bot *Bot) removeCommand(i *discordgo.InteractionCreate) {
 
 	bot.Queue.RemoveSong(index - 1)
 	bot.sendFollowUp(i, fmt.Sprintf("Removed song %s by %s", song.Name, song.Artist))
+}
+
+func (bot *Bot) stopCommand(i *discordgo.InteractionCreate) {
+	go func() {
+		bot.Player.Stop <- true
+	}()
+
+	bot.sendFollowUp(i, "Leaving the voice channel")
 }
 
 func (bot *Bot) pauseCommand(i *discordgo.InteractionCreate) {

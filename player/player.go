@@ -86,8 +86,16 @@ playLoop:
 				continue playLoop
 			case <-p.Pause:
 				stream.SetPaused(true)
+				log.Println("Pause signal received, playing previous song")
 			case <-p.Resume:
 				stream.SetPaused(false)
+				log.Println("Play signal received, playing previous song")
+			case <-p.Stop:
+				encodeSession.Cleanup()
+				log.Println("Stop signal received, stopping song and clearing queue")
+				q.Clear()
+				vc.Disconnect()
+				return
 			}
 		}
 	}

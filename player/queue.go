@@ -42,6 +42,7 @@ func (q *Queue) GetCurrentSong() *Song {
 	return nil
 }
 
+// Removes song by index number
 func (q *Queue) RemoveSong(index int) {
 	if index >= 0 && index < len(q.Songs) {
 		q.Songs = append(q.Songs[:index], q.Songs[index+1:]...)
@@ -49,6 +50,12 @@ func (q *Queue) RemoveSong(index int) {
 			q.Current--
 		}
 	}
+}
+
+// Removes all songs from queue
+func (q *Queue) Clear() {
+	q.Songs = []Song{}
+	q.Current = 0
 }
 
 func (q *Queue) String() string {
