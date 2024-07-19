@@ -1,9 +1,9 @@
 package bot
 
 import (
-	"discordBot/player"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
@@ -21,7 +21,7 @@ func (bot *Bot) interactionCreate(s *discordgo.Session, i *discordgo.Interaction
 			bot.setup(i)
 			bot.playCommand(i)
 		case "queue":
-			bot.queueCommand(i.Interaction, bot.Queue.String())
+			bot.queueCommand(i.Interaction, bot.Player.Queue.String())
 		case "stop":
 			bot.sendResponse(i.Interaction, "Processing...")
 			bot.stopCommand(i)
@@ -87,6 +87,10 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 			Description: "Go back to the previous song in the queue",
 		},
 		{
+			Name:        "clear",
+			Description: "Clear queue",
+		},
+		{
 			Name:        "remove",
 			Description: "Remove a song from the queue",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -106,7 +110,7 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 		wg.Add(1)
 		go func(command *discordgo.ApplicationCommand) {
 			defer wg.Done()
-			log.Printf("Registering command: %v", command.Name) // Add this line for debugging
+			// log.Printf("Registering command: %v", command.Name) // Add this line for debugging
 			_, err := s.ApplicationCommandCreate(s.State.User.ID, "", command)
 			if err != nil {
 				fmt.Printf("Cannot create '%v' command: %v\n", command.Name, err)
@@ -169,10 +173,15 @@ func (bot *Bot) queueCommand(i *discordgo.Interaction, response string) {
 func (bot *Bot) removeCommand(i *discordgo.InteractionCreate) {
 	index := int(i.ApplicationCommandData().Options[0].IntValue())
 
-	song := bot.Queue.Songs[index-1]
+	song := bot.Player.Queue.Songs[index-1]
 
-	bot.Queue.RemoveSong(index - 1)
+	bot.Player.Queue.RemoveSong(index - 1)
 	bot.sendFollowUp(i, fmt.Sprintf("Removed song %s by %s", song.Name, song.Artist))
+}
+
+func (bot *Bot) clearCommand(i *discordgo.InteractionCreate) {
+	bot.Player.Queue.Clear()
+	bot.sendFollowUp(i, "Queue has been cleared")
 }
 
 func (bot *Bot) stopCommand(i *discordgo.InteractionCreate) {
@@ -223,26 +232,25 @@ func (bot *Bot) playCommand(i *discordgo.InteractionCreate) {
 	}
 
 	// Start streaming if not already playing
-	if len(bot.Queue.Songs) == 1 {
-		bot.Player.Stream(bot.VoiceConnection, &bot.Queue)
+	if len(bot.Player.Queue.Songs) == 1 {
+		bot.Player.Stream(bot.VoiceConnection)
 	}
 }
 
 func (bot *Bot) setup(i *discordgo.InteractionCreate) {
 	trackName := i.ApplicationCommandData().Options[0].StringValue()
-	bot.Player.Name = trackName
-	log.Println("setup invoked")
+	log.Println("setup invoked with input:", trackName)
 
-	bot.Player.Find()
-
-	log.Println("Adding song to queue")
-	bot.Queue.AddSong(player.Song{Name: bot.Player.Track.Name, Artist: bot.Player.Track.Artists[0].Name, Url: bot.Player.VideoID})
-
-	if len(bot.Queue.Songs) == 1 {
-		log.Println("Now playing")
-		bot.sendFollowUp(i, fmt.Sprintf("Now playing: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
-	} else {
-		log.Println("Added to queue")
-		bot.sendFollowUp(i, fmt.Sprintf("Added to queue: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+	// Find the appropriate handler based on the URL prefix
+	for prefix, handler := range urlHandlers {
+		if strings.HasPrefix(trackName, prefix) {
+			handler(bot, trackName, i)
+			return
+		}
 	}
+
+	// Default handling for unknown URLs
+	bot.Player.Name = trackName
+	bot.Player.Find()
+	bot.sendFollowUp(i, fmt.Sprintf("Added to queue: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
 }

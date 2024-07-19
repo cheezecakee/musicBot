@@ -23,8 +23,6 @@ type Bot struct {
 	VoiceConnection *discordgo.VoiceConnection
 	VoiceState      *discordgo.VoiceState
 	Player          player.Player
-	Queue           player.Queue
-	Song            player.Song
 }
 
 func Run() {
@@ -32,15 +30,7 @@ func Run() {
 
 	bot := &Bot{
 		Session: session,
-		Player: player.Player{
-			Skip:   make(chan bool),
-			Prev:   make(chan bool),
-			Pause:  make(chan bool),
-			Resume: make(chan bool),
-			Stop:   make(chan bool),
-		},
-		Queue: player.Queue{},
-		Song:  player.Song{},
+		Player:  *player.NewPlayer(),
 	}
 
 	// Add an event handler

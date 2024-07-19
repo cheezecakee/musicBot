@@ -23,6 +23,8 @@ type Player struct {
 	Resume  chan bool
 	Pause   chan bool
 	Stop    chan bool
+	Queue   *Queue
+	Song    *Song
 }
 
 func NewPlayer() *Player {
@@ -32,15 +34,18 @@ func NewPlayer() *Player {
 		Pause:  make(chan bool),
 		Resume: make(chan bool),
 		Stop:   make(chan bool),
+		Queue:  &Queue{},
+		Song:   &Song{},
 	}
 }
 
-func (p *Player) Stream(vc *discordgo.VoiceConnection, q *Queue) {
+func (p *Player) Stream(vc *discordgo.VoiceConnection) {
 	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
 playLoop:
 	for {
-		currentSong := q.GetCurrentSong()
+		currentSong := p.Queue.GetCurrentSong()
 		if currentSong == nil {
 			log.Println("No more songs in the queue.")
 			return
@@ -70,19 +75,19 @@ playLoop:
 				}
 				encodeSession.Cleanup()
 				log.Println("Song ended, moving to the next song")
-				q.Next()
+				p.Queue.Next()
 				continue playLoop
 			case <-ticker.C:
 				stream.PlaybackPosition()
 			case <-p.Skip:
 				encodeSession.Cleanup()
 				log.Println("Skip signal received, skipping to next song")
-				q.Next()
+				p.Queue.Next()
 				continue playLoop
 			case <-p.Prev:
 				encodeSession.Cleanup()
 				log.Println("Prev signal received, playing previous song")
-				q.Previous()
+				p.Queue.Previous()
 				continue playLoop
 			case <-p.Pause:
 				stream.SetPaused(true)
@@ -93,28 +98,11 @@ playLoop:
 			case <-p.Stop:
 				encodeSession.Cleanup()
 				log.Println("Stop signal received, stopping song and clearing queue")
-				q.Clear()
+				p.Queue.Clear()
 				vc.Disconnect()
 				return
 			}
 		}
-	}
-}
-
-// Finds the song
-func (p *Player) Find() {
-	// Search for the track on Spotify
-	track, err := app.SearchTrack(p.Name)
-	if err != nil {
-		fmt.Printf("error searching track: %v\n", err)
-	}
-	p.Track = track
-
-	// Use the track name and artist for the Youtube search query
-	query := fmt.Sprintf("%s %s official audio lyric", track.Name, track.Artists[0].Name)
-	p.VideoID, err = app.SearchVideo(query)
-	if err != nil {
-		fmt.Printf("error searching video: %v\n", err)
 	}
 }
 
@@ -139,4 +127,58 @@ func (p *Player) url(videoID string) string {
 	// log.Printf("%+v\n\n", formats)
 
 	return streamURL
+}
+
+// Finds the song based on name or spotify link
+func (p *Player) Find() {
+	// Search for the track on Spotify
+	track, err := app.SearchTrack(p.Name)
+	if err != nil {
+		fmt.Printf("error searching track: %v\n", err)
+	}
+	p.Track = track
+
+	// Use the track name and artist for the Youtube search query
+	query := fmt.Sprintf("%s %s official audio lyric", track.Name, track.Artists[0].Name)
+	p.VideoID, err = app.SearchVideo(query)
+	if err != nil {
+		fmt.Printf("error searching video: %v\n", err)
+	}
+
+	log.Println("Adding song to queue")
+	p.Queue.AddSong(Song{Name: p.Track.Name, Artist: p.Track.Artists[0].Name, Url: p.VideoID})
+}
+
+// Finds the song based on spotify playlist link
+func (p *Player) FindPlaylistSpotify(playlistID string) {
+	// Fetch the playlist details
+	tracks, err := app.SearchSpotifyPlaylist(playlistID)
+	if err != nil {
+		fmt.Printf("error fetching playlist: %v\n", err)
+		return
+	}
+
+	// Add each track to the queue
+	for _, track := range tracks {
+		query := fmt.Sprintf("%s %s official audio lyric", track.Name, track.Artists[0].Name)
+		videoID, err := app.SearchVideo(query)
+		if err != nil {
+			fmt.Printf("error searching video: %v\n", err)
+			continue
+		}
+		p.Queue.AddSong(Song{Name: track.Name, Artist: track.Artists[0].Name, Url: videoID})
+	}
+}
+
+// Finds the song based on youtube song link
+func (p *Player) FindYoutube(videoID string) string {
+	// Fetch video details
+	trackName, err := app.GetTrackInfoFromYouTubeURL(videoID)
+	if err != nil {
+		fmt.Printf("error fetching track info: %v\n", err)
+		return ""
+	}
+	p.Queue.AddSong(Song{Name: trackName, Url: videoID})
+
+	return trackName
 }

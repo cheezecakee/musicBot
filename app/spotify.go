@@ -10,11 +10,12 @@ import (
 	"github.com/zmb3/spotify/v2"
 )
 
-var Clients *auth.Clients
+var (
+	Clients *auth.Clients
+	ctx     = context.Background()
+)
 
 func SearchTrack(query string) (*spotify.FullTrack, error) {
-	ctx := context.Background()
-
 	// Check if the query is a Spotify URL
 	if strings.HasPrefix(query, "https://open.spotify.com/track/") {
 		parsedURL, err := url.Parse(query)
@@ -45,4 +46,21 @@ func SearchTrack(query string) (*spotify.FullTrack, error) {
 
 	// If no tracks are found by name, return an error
 	return nil, fmt.Errorf("no tracks found")
+}
+
+func SearchSpotifyPlaylist(playlistID string) ([]*spotify.FullTrack, error) {
+	ctx := context.Background()
+	playlistItems, err := Clients.Spotify.GetPlaylistItems(ctx, spotify.ID(playlistID))
+	if err != nil {
+		return nil, fmt.Errorf("error fetching playlist items: %v", err)
+	}
+
+	tracks := make([]*spotify.FullTrack, 0)
+	for _, item := range playlistItems.Items {
+		if item.Track.Track != nil {
+			fullTrack := item.Track.Track
+			tracks = append(tracks, fullTrack)
+		}
+	}
+	return tracks, nil
 }
