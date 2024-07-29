@@ -1,0 +1,11 @@
+# Ignore the Go module cache
+**/vendor
+
+# Ignore build artifacts
+*.exe
+*.test
+*.out
+
+# Ignore local environment files
+# .env
+
