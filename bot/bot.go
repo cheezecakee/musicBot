@@ -2,7 +2,7 @@ package bot
 
 import (
 	"discordBot/app/auth"
-	"discordBot/nlp"
+	// "discordBot/nlp"
 	"discordBot/player"
 	"fmt"
 	"log"
@@ -110,17 +110,25 @@ func (bot *Bot) getTrackName() {
 
 func (bot *Bot) HandleCommand() error {
 	switch {
+	case strings.Contains(bot.Message.Content, "!help"):
+		return bot.handleHelpCommand()
 	case strings.Contains(bot.Message.Content, "!hello"):
 		return bot.handleHelloCommand()
 	case strings.Contains(bot.Message.Content, "!bye"):
 		return bot.handleByeCommand()
 	case strings.Contains(bot.Message.Content, "!join"):
-		if err := bot.voiceRecognition(); err != nil {
+		if err := bot.handleJoinCommand(bot.Message.Author.ID); err != nil {
 			return err
 		}
 	default:
 		return nil
 	}
+	return nil
+}
+
+func (bot *Bot) handleHelpCommand() error {
+	bot.sendMessage("To use the bot with voice voice recognition simply use the command !join say one of the available [commands]:' ")
+	bot.sendMessage("play [song name], pause, skip, back, remove [song name], queue")
 	return nil
 }
 
@@ -149,6 +157,9 @@ func (bot *Bot) handleJoinCommand(userID string) error {
 
 	bot.VoiceConnection = voice
 
+	// Handle voice data in real-time
+	// go nlp.HandleVoice(bot.VoiceConnection.OpusRecv, bot.Message.ChannelID, bot.Message.Author.ID, bot.Session)
+
 	return nil
 }
 
@@ -160,15 +171,4 @@ func (bot *Bot) handleLeaveCommand() {
 	} else {
 		bot.sendMessage("I'm not in a voice channel.")
 	}
-}
-
-func (bot *Bot) voiceRecognition() error {
-	if err := bot.handleJoinCommand(bot.Message.Author.ID); err != nil {
-		return err
-	}
-
-	// Handle voice data in real-time
-	go nlp.HandleVoice(bot.VoiceConnection.OpusRecv, bot.Message.ChannelID, bot.Message.Author.ID, bot.Session)
-
-	return nil
 }

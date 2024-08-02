@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"discordBot/nlp"
 	"fmt"
 	"log"
 	"strings"
@@ -40,6 +41,9 @@ func (bot *Bot) interactionCreate(s *discordgo.Session, i *discordgo.Interaction
 		case "remove":
 			bot.sendResponse(i.Interaction, "Processing...")
 			bot.removeCommand(i)
+		case "join":
+			bot.sendResponse(i.Interaction, "Processing...")
+			bot.VoiceRecognition(i)
 		}
 	}
 }
@@ -91,6 +95,10 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 			Description: "Clear queue",
 		},
 		{
+			Name:        "join",
+			Description: "Join voice channel",
+		},
+		{
 			Name:        "remove",
 			Description: "Remove a song from the queue",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -110,7 +118,7 @@ func (bot *Bot) registerCommands(s *discordgo.Session) {
 		wg.Add(1)
 		go func(command *discordgo.ApplicationCommand) {
 			defer wg.Done()
-			// log.Printf("Registering command: %v", command.Name) // Add this line for debugging
+			log.Printf("Registering command: %v", command.Name) // Add this line for debugging
 			_, err := s.ApplicationCommandCreate(s.State.User.ID, "", command)
 			if err != nil {
 				fmt.Printf("Cannot create '%v' command: %v\n", command.Name, err)
@@ -253,4 +261,76 @@ func (bot *Bot) setup(i *discordgo.InteractionCreate) {
 	bot.Player.Name = trackName
 	bot.Player.Find()
 	bot.sendFollowUp(i, fmt.Sprintf("Added to queue: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+}
+
+func (bot *Bot) VoiceRecognition(i *discordgo.InteractionCreate) {
+	userID := i.Member.User.ID
+
+	if err := bot.handleJoinCommand(userID); err != nil {
+		log.Printf("Error in handleJoinCommand: %v", err)
+		return
+	}
+
+	key := nlp.NewKeyWords()
+
+	// Handle voice data in real-time
+	go nlp.HandleVoice(bot.VoiceConnection.OpusRecv, bot.Message.ChannelID, bot.Message.Author.ID, bot.Session)
+
+	go func() {
+		ran := make(map[string]bool) // Map to keep track of sent messages
+	Loop:
+		for {
+
+			command := nlp.Command
+			if !ran[command] {
+				for {
+					switch nlp.Command {
+					case key.Play:
+						// Default handling for unknown URLs
+						bot.Player.Name = nlp.Arg
+						bot.Player.Find()
+						// Start streaming if not already playing
+						if len(bot.Player.Queue.Songs) == 1 {
+							go bot.Player.Stream(bot.VoiceConnection)
+						}
+						bot.sendFollowUp(i, fmt.Sprintf("Added to queue: %s by %s", bot.Player.Track.Name, bot.Player.Track.Artists[0].Name))
+						ran[key.Play] = true
+						continue Loop
+					case key.Pause:
+						bot.Player.Pause <- true
+						ran[key.Pause] = true
+						continue Loop
+					case key.Resume:
+						bot.Player.Resume <- true
+						ran[key.Resume] = true
+						continue Loop
+					case key.Skip:
+						bot.skipCommand(i)
+						ran[key.Skip] = true
+						continue Loop
+					case key.Back:
+						bot.prevCommand(i)
+						ran[key.Back] = true
+						continue Loop
+					case key.Queue:
+						bot.sendFollowUp(i, bot.Player.Queue.String())
+						ran[key.Queue] = true
+						continue Loop
+					case key.Remove:
+						// You may need additional logic to parse the argument to an int
+						// Example: if len(words) > 1 { songNum, _ := strconv.Atoi(words[1]) commands.Remove <- songNum }
+						bot.sendFollowUp(i, "Removed Song.")
+						ran[key.Remove] = true
+						continue Loop
+					}
+					// Reset the messageSent map if a new command is detected
+					if nlp.Command != "" {
+						for key := range ran {
+							ran[key] = false
+						}
+					}
+				}
+			}
+		}
+	}()
 }
