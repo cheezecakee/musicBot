@@ -1,6 +1,18 @@
 # musicBot
 
-A version that will support voice-recognition to request, skip, pause and other commands straight through the voice channel.
+Supports wake word detection.
+Current working words are:
+- play
+- pause
+- resume
+- skip 
+- back
+- queue
+
+Works best with [vosk-model-en-us-0.42-gigaspeech](https://alphacephei.com/vosk/models)
+
+Only been test on windows using powershell 7. 
+Might need to change the exec file and nlp ".h" ".dll/.so" files according to [vosk](https://github.com/alphacep/vosk-api/releases) 
 
 # Acknowledgments
 
